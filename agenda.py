@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.5.1   (31-jul-2025)
+AGENDA GENERATOR API – Gandarías v3.6   (31-jul-2025)
 
+• Selección de plantilla:
+    1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
+    2) Si no existe, usar la única plantilla con IsActive = TRUE
 • Turnos obligatorios (UserShifts) → prioridad, sin BT/C.
 • VAC / ABS visibles en preview y guardados en BD (Workstation “AUSENCIA”).
-• Plantilla activa única obligatoria.
 """
 
 import uuid
@@ -101,19 +103,37 @@ def monday(d: date) -> date:
     while d.weekday() != 0: d -= timedelta(days=1)
     return d
 
-def active_template(cur):
+def pick_template(cur, week_start: date, week_end: date):
+    """Primero intenta por rango StartDate/EndDate; si no, cae a la plantilla activa única."""
+    # 1) Por rango (solapamiento con la semana)
+    rows = fetchall(cur, '''
+        SELECT "Id","Name"
+        FROM "Management"."WorkstationDemandTemplates"
+        WHERE COALESCE("StartDate", '-infinity'::date) <= %s
+          AND COALESCE("EndDate",   'infinity'::date)   >= %s
+        ORDER BY COALESCE("StartDate", '-infinity'::date) DESC,
+                 COALESCE("DateCreated", '-infinity'::timestamptz) DESC
+        LIMIT 1
+    ''', (week_end, week_start))
+    if rows:
+        return rows[0]
+
+    # 2) Por activo único
     cur.execute('SELECT "Id","Name" FROM "Management"."WorkstationDemandTemplates" WHERE "IsActive"')
-    rows = cur.fetchall()
-    if not rows:      raise DataNotFoundError("No hay plantilla de demanda activa")
-    if len(rows) > 1: raise DataIntegrityError("Existe más de una plantilla activa")
-    return rows[0]
+    act = cur.fetchall()
+    if not act:
+        raise DataNotFoundError("No existe plantilla por rango ni plantilla activa")
+    if len(act) > 1:
+        raise DataIntegrityError("Existen múltiples plantillas activas; deja sólo una activa")
+    return act[0]
 
 # ───────── CARGA DATOS ─────────
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
+    week_end = week[-1]
 
     with conn() as c, c.cursor() as cur:
-        tpl_id, tpl_name = active_template(cur)
+        tpl_id, tpl_name = pick_template(cur, week_start, week_end)
 
         # Demandas
         demands = [Demand(r) for r in fetchall(cur, '''
@@ -129,7 +149,7 @@ def load_data(week_start: date):
             ORDER BY d."Day", d."StartTime"
         ''', (week_start, tpl_id))]
         if not demands:
-            raise DataNotFoundError("La plantilla activa no tiene demandas")
+            raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
 
         # Empleados
         emps = {r[0]: Emp(r) for r in fetchall(cur, '''
@@ -172,7 +192,7 @@ def load_data(week_start: date):
                    "AvailableFrom","AvailableUntil"
             FROM "Management"."EmployeeScheduleExceptions"
             WHERE "Date" BETWEEN %s AND %s
-        ''', (week_start, week[-1])):
+        ''', (week_start, week_end)):
             if uid not in emps: continue
             if rt == 0:
                 emps[uid].absent.add(d)
@@ -187,7 +207,7 @@ def load_data(week_start: date):
             FROM "Management"."Licenses"
             WHERE "StartDate"::date <= %s
               AND COALESCE("EndDate"::date,%s) >= %s
-        ''', (week[-1], week[-1], week[-1], week_start)):
+        ''', (week_end, week_end, week_end, week_start)):
             if uid not in emps: continue
             d = max(sd, week_start)
             while d <= ed:
@@ -201,24 +221,23 @@ def load_data(week_start: date):
             FROM "Management"."UserAbsenteeisms"
             WHERE "StartDate"::date <= %s
               AND COALESCE("EndDate"::date,%s) >= %s
-        ''', (week[-1], week[-1], week[-1], week_start)):
+        ''', (week_end, week_end, week_end, week_start)):
             if uid not in emps: continue
             d = max(sd, week_start)
             while d <= ed:
                 emps[uid].absent.add(d); emps[uid].abs_reason[d] = 'ABS'
                 d += timedelta(days=1)
 
-        # Turnos obligatorios (UserShifts)
+        # Turnos obligatorios (UserShifts) — prioridad
         fixed = defaultdict(list)
         for uid, day, blk1, blk2 in fetchall(cur, '''
             SELECT "UserId","Day","Block1Start","Block2Start"
             FROM "Management"."UserShifts"
-            WHERE "IsActive"
         '''):
             if uid not in emps:
                 continue
             shift_date = week_start + timedelta(days=day)
-            if not (week_start <= shift_date <= week[-1]):
+            if not (week_start <= shift_date <= week_end):
                 continue
             for blk in (blk1, blk2):
                 if blk is None: continue
@@ -371,12 +390,12 @@ def generate(week_start: date):
                                  else calc_obs(emp, d, sched[d], fixed_ids)
             })
 
-    return res, sched, emps, week
+    return res, sched, emps, week, fixed_ids
 
 # ───────── ENDPOINTS ─────────
 @app.route('/api/health')
 def health():
-    st = {"status":"checking","timestamp":now().isoformat(),"version":"3.5.1","checks":{}}
+    st = {"status":"checking","timestamp":now().isoformat(),"version":"3.6","checks":{}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -396,7 +415,7 @@ def preview():
     except ValueError:
         return jsonify({"error":"Fecha inválida"}), 400
     try:
-        res, _, _, _ = generate(ws)
+        res, _, _, _, _ = generate(ws)
         return jsonify(res), 200
     except (DatabaseConnectionError, DataNotFoundError, ScheduleGenerationError) as e:
         return jsonify({"error": str(e)}), 400
@@ -415,7 +434,7 @@ def save():
     we = ws + timedelta(days=6)
 
     try:
-        res, sched, emps, week = generate(ws)
+        res, sched, emps, week, fixed_ids = generate(ws)
     except (DatabaseConnectionError, DataNotFoundError, ScheduleGenerationError) as e:
         return jsonify({"error": str(e)}), 400
 
@@ -430,11 +449,10 @@ def save():
             if force:
                 cur.execute('DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
 
-            # asignaciones normales
+            # insertar filas
             for d, ass in sched.items():
                 for emp, dm in ass:
                     if dm.wsid == ABS_WS_ID:
-                        # fila ausencia
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
@@ -454,7 +472,7 @@ def save():
                         ''', (uid(), d, str(emp.id), str(dm.wsid),
                               timedelta(hours=dm.start.hour, minutes=dm.start.minute),
                               timedelta(hours=dm.end.hour,   minutes=dm.end.minute),
-                              calc_obs(emp, d, ass, {(e.id, dd.id) for e, dd in ass}),
+                              calc_obs(emp, d, ass, fixed_ids),
                               False, now()))
             c.commit()
     except Exception as e:
@@ -466,5 +484,5 @@ def save():
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.5.1 ↗ http://localhost:5000")
+    print("🚀 API Gandarías v3.6 ↗ http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
