@@ -1,0 +1,5 @@
+flask==3.0.3
+flask-cors==4.0.1
+ortools==9.10.4067
+psycopg2-binary==2.9.9
+serverless-wsgi==3.0.4

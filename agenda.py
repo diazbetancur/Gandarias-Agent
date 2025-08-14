@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.6   (31-jul-2025)
+AGENDA GENERATOR API – Gandarías v3.7   (31-jul-2025)
 
-• Selección de plantilla:
-    1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
-    2) Si no existe, usar la única plantilla con IsActive = TRUE
-• Turnos obligatorios (UserShifts) → prioridad, sin BT/C.
-• VAC / ABS visibles en preview y guardados en BD (Workstation “AUSENCIA”).
+Reglas clave:
+1) Selección de plantilla:
+   a) Si existe una activa (única) → usarla
+   b) Si no hay activa → usar una que solape con la semana solicitada
+   c) Si no hay que solape → usar la más cercana por fecha
+2) Turnos obligatorios (UserShifts) → prioridad; sus filas NO llevan BT/C
+3) VAC/ABS visibles en preview y también se guardan en "Schedules"
 """
 
 import uuid
@@ -104,9 +106,24 @@ def monday(d: date) -> date:
     return d
 
 def pick_template(cur, week_start: date, week_end: date):
-    """Primero intenta por rango StartDate/EndDate; si no, cae a la plantilla activa única."""
-    # 1) Por rango (solapamiento con la semana)
-    rows = fetchall(cur, '''
+    """
+    1) Activa única → usarla
+    2) Si no hay activa → por solape con la semana
+    3) Si no hay solape → la más cercana por distancia en segundos
+    """
+    # 1) Activa(s)
+    act = fetchall(cur, '''
+        SELECT "Id","Name"
+        FROM "Management"."WorkstationDemandTemplates"
+        WHERE "IsActive"
+    ''')
+    if len(act) == 1:
+        return act[0]
+    if len(act) > 1:
+        raise DataIntegrityError("Existen múltiples plantillas activas; deja sólo una activa")
+
+    # 2) Por solape de rango
+    overlap = fetchall(cur, '''
         SELECT "Id","Name"
         FROM "Management"."WorkstationDemandTemplates"
         WHERE COALESCE("StartDate", '-infinity'::date) <= %s
@@ -115,17 +132,23 @@ def pick_template(cur, week_start: date, week_end: date):
                  COALESCE("DateCreated", '-infinity'::timestamptz) DESC
         LIMIT 1
     ''', (week_end, week_start))
-    if rows:
-        return rows[0]
+    if overlap:
+        return overlap[0]
 
-    # 2) Por activo único
-    cur.execute('SELECT "Id","Name" FROM "Management"."WorkstationDemandTemplates" WHERE "IsActive"')
-    act = cur.fetchall()
-    if not act:
-        raise DataNotFoundError("No existe plantilla por rango ni plantilla activa")
-    if len(act) > 1:
-        raise DataIntegrityError("Existen múltiples plantillas activas; deja sólo una activa")
-    return act[0]
+    # 3) Más cercana (usar distancia en segundos)
+    nearest = fetchall(cur, '''
+        SELECT "Id","Name"
+        FROM "Management"."WorkstationDemandTemplates"
+        ORDER BY LEAST(
+                   ABS(EXTRACT(EPOCH FROM (COALESCE("StartDate", %s)::timestamp - %s::timestamp))),
+                   ABS(EXTRACT(EPOCH FROM (COALESCE("EndDate",   %s)::timestamp - %s::timestamp)))
+               ) ASC,
+               COALESCE("DateCreated", '-infinity'::timestamptz) DESC
+        LIMIT 1
+    ''', (week_start, week_start, week_end, week_end))
+    if not nearest:
+        raise DataNotFoundError("No se encontró ninguna plantilla de demanda")
+    return nearest[0]
 
 # ───────── CARGA DATOS ─────────
 def load_data(week_start: date):
@@ -325,12 +348,12 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
     return out
 
 # ───────── OBSERVACIONES ─────────
-def calc_obs(emp: Emp, d: date, assigns: list, fixed_ids: set):
-    for e, dm in assigns:
-        if e.id == emp.id and (e.id, dm.id) in fixed_ids:
-            return ""          # turno fijo jamás lleva BT/C
-    cnt = sum(1 for e, _ in assigns if e.id == emp.id)
-    if cnt == 1: return ""
+def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
+    # Si esta fila es de turno fijo → nunca BT/C
+    if (emp.id, dm.id) in fixed_ids:
+        return ""
+    # Capacidad del día para el empleado
+    cnt  = sum(1 for e, _ in assigns_day if e.id == emp.id)
     maxs = MAX_SHIFTS_HYBRID if emp.is_hybrid() else \
            MAX_SHIFTS_SPLIT  if emp.split      else MAX_SHIFTS_CONTINUOUS
     return "BT" if cnt < maxs else "C"
@@ -339,6 +362,8 @@ def calc_obs(emp: Emp, d: date, assigns: list, fixed_ids: set):
 def generate(week_start: date):
     emps, demands, tpl, week, fixed = load_data(week_start)
     sched = solve(emps, demands, week)
+
+    # añadir turnos fijos
     for d, lst in fixed.items():
         sched[d].extend(lst)
 
@@ -387,7 +412,7 @@ def generate(week_start: date):
                 "end_time":      "--" if dm.wsid == ABS_WS_ID else dm.end.strftime("%H:%M"),
                 "observation":   "VAC" if dm.wsid == ABS_WS_ID and emp.abs_reason.get(d) == "VAC"
                                  else "ABS" if dm.wsid == ABS_WS_ID
-                                 else calc_obs(emp, d, sched[d], fixed_ids)
+                                 else calc_obs(emp, dm, sched[d], fixed_ids)
             })
 
     return res, sched, emps, week, fixed_ids
@@ -395,7 +420,7 @@ def generate(week_start: date):
 # ───────── ENDPOINTS ─────────
 @app.route('/api/health')
 def health():
-    st = {"status":"checking","timestamp":now().isoformat(),"version":"3.6","checks":{}}
+    st = {"status":"checking","timestamp":now().isoformat(),"version":"3.7","checks":{}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -472,7 +497,7 @@ def save():
                         ''', (uid(), d, str(emp.id), str(dm.wsid),
                               timedelta(hours=dm.start.hour, minutes=dm.start.minute),
                               timedelta(hours=dm.end.hour,   minutes=dm.end.minute),
-                              calc_obs(emp, d, ass, fixed_ids),
+                              calc_obs(emp, dm, ass, fixed_ids),
                               False, now()))
             c.commit()
     except Exception as e:
@@ -484,5 +509,5 @@ def save():
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.6 ↗ http://localhost:5000")
+    print("🚀 API Gandarías v3.7 ↗ http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
