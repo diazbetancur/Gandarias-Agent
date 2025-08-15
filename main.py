@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.7   (31-jul-2025)
+AGENDA GENERATOR API – Gandarías v3.6   (31-jul-2025)
 
-Reglas clave:
-1) Selección de plantilla:
-   a) Si existe una activa (única) → usarla
-   b) Si no hay activa → usar una que solape con la semana solicitada
-   c) Si no hay que solape → usar la más cercana por fecha
-2) Turnos obligatorios (UserShifts) → prioridad; sus filas NO llevan BT/C
-3) VAC/ABS visibles en preview y también se guardan en "Schedules"
+• Selección de plantilla:
+    1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
+    2) Si no existe, usar la única plantilla con IsActive = TRUE
+• Turnos obligatorios (UserShifts) → prioridad, sin BT/C.
+• VAC / ABS visibles en preview y guardados en BD (Workstation “AUSENCIA”).
 """
 
-import uuid
 import logging
-import psycopg2
-from datetime import datetime, date, time, timedelta, timezone
+import uuid
 from collections import defaultdict
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Tuple
 
-from ortools.sat.python import cp_model
-from flask import Flask, request, jsonify
+import psycopg2
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from psycopg2 import OperationalError, DataError, ProgrammingError
+from ortools.sat.python import cp_model
+from psycopg2 import DataError, OperationalError, ProgrammingError
 
 # ───────── FLASK APP ─────────
 app = Flask(__name__)
 CORS(app)
+
+# Esto es un cambio para despliegue de nuevo
 
 # ───────── BD CONFIG ─────────
 DB = {
@@ -42,41 +42,59 @@ ABS_WS_ID = '00000000-0000-0000-0000-000000000000'   # Puesto AUSENCIA
 
 # ───────── PARÁMETROS ─────────
 MIN_HOURS_BETWEEN_SHIFTS = 9
-MIN_HOURS_BETWEEN_SPLIT  = 4
-MAX_SHIFTS_CONTINUOUS    = 1
-MAX_SHIFTS_SPLIT         = 2
-MAX_SHIFTS_HYBRID        = 4
-MAX_DAYS_PER_WEEK        = 6
+MIN_HOURS_BETWEEN_SPLIT = 4
+MAX_SHIFTS_CONTINUOUS = 1
+MAX_SHIFTS_SPLIT = 2
+MAX_SHIFTS_HYBRID = 4
+MAX_DAYS_PER_WEEK = 6
 
-uid = lambda: str(uuid.uuid4())
-now = lambda: datetime.now(timezone.utc)
+
+def uid(): return str(uuid.uuid4())
+def now(): return datetime.now(timezone.utc)
 
 # ───────── EXCEPCIONES ─────────
-class DatabaseConnectionError(Exception): ...
-class DataNotFoundError(Exception): ...
-class DataIntegrityError(Exception): ...
-class ScheduleGenerationError(Exception): ...
+
+
+class DatabaseConnectionError(Exception):
+    ...
+
+
+class DataNotFoundError(Exception):
+    ...
+
+
+class DataIntegrityError(Exception):
+    ...
+
+
+class ScheduleGenerationError(Exception):
+    ...
 
 # ───────── MODELOS ─────────
+
+
 class Emp:
     def __init__(self, row: Tuple):
         self.id, self.name, self.split = row
-        self.roles   = set()
+        self.roles = set()
         self.day_off = set()
-        self.window  = defaultdict(list)
-        self.exc     = defaultdict(list)
-        self.absent  = set()
+        self.window = defaultdict(list)
+        self.exc = defaultdict(list)
+        self.absent = set()
         self.abs_reason = {}      # fecha → 'VAC' / 'ABS'
 
-    def is_hybrid(self):      return len(self.roles) >= 4
-    def can(self, ws):        return ws in self.roles
-    def off(self, d):         return d.weekday() in self.day_off
-    def absent_day(self, d):  return d in self.absent
+    def is_hybrid(self): return len(self.roles) >= 4
+    def can(self, ws): return ws in self.roles
+    def off(self, d): return d.weekday() in self.day_off
+    def absent_day(self, d): return d in self.absent
 
     def available(self, d, s, e):
-        if self.off(d) or self.absent_day(d): return False
-        win = self.exc.get(d) or self.window.get(d.weekday(), [(time(0), time(23,59))])
+        if self.off(d) or self.absent_day(d):
+            return False
+        win = self.exc.get(d) or self.window.get(
+            d.weekday(), [(time(0), time(23, 59))])
         return any(a <= s and e <= b for a, b in win)
+
 
 class Demand:
     def __init__(self, row: Tuple):
@@ -86,44 +104,39 @@ class Demand:
         self.need = int(need)
 
 # ───────── HELPERS BD ─────────
+
+
 def conn():
     try:
         return psycopg2.connect(**DB)
     except OperationalError as e:
         t = str(e)
-        if "could not connect" in t:      raise DatabaseConnectionError("No se puede conectar al servidor de BD")
-        if "authentication failed" in t: raise DatabaseConnectionError("Credenciales de BD incorrectas")
+        if "could not connect" in t:
+            raise DatabaseConnectionError(
+                "No se puede conectar al servidor de BD")
+        if "authentication failed" in t:
+            raise DatabaseConnectionError("Credenciales de BD incorrectas")
         raise DatabaseConnectionError(t)
+
 
 def fetchall(cur, sql, pars=()):
     try:
-        cur.execute(sql, pars); return cur.fetchall()
+        cur.execute(sql, pars)
+        return cur.fetchall()
     except (ProgrammingError, DataError) as e:
         raise DataIntegrityError(str(e))
 
+
 def monday(d: date) -> date:
-    while d.weekday() != 0: d -= timedelta(days=1)
+    while d.weekday() != 0:
+        d -= timedelta(days=1)
     return d
 
-def pick_template(cur, week_start: date, week_end: date):
-    """
-    1) Activa única → usarla
-    2) Si no hay activa → por solape con la semana
-    3) Si no hay solape → la más cercana por distancia en segundos
-    """
-    # 1) Activa(s)
-    act = fetchall(cur, '''
-        SELECT "Id","Name"
-        FROM "Management"."WorkstationDemandTemplates"
-        WHERE "IsActive"
-    ''')
-    if len(act) == 1:
-        return act[0]
-    if len(act) > 1:
-        raise DataIntegrityError("Existen múltiples plantillas activas; deja sólo una activa")
 
-    # 2) Por solape de rango
-    overlap = fetchall(cur, '''
+def pick_template(cur, week_start: date, week_end: date):
+    """Primero intenta por rango StartDate/EndDate; si no, cae a la plantilla activa única."""
+    # 1) Por rango (solapamiento con la semana)
+    rows = fetchall(cur, '''
         SELECT "Id","Name"
         FROM "Management"."WorkstationDemandTemplates"
         WHERE COALESCE("StartDate", '-infinity'::date) <= %s
@@ -132,25 +145,24 @@ def pick_template(cur, week_start: date, week_end: date):
                  COALESCE("DateCreated", '-infinity'::timestamptz) DESC
         LIMIT 1
     ''', (week_end, week_start))
-    if overlap:
-        return overlap[0]
+    if rows:
+        return rows[0]
 
-    # 3) Más cercana (usar distancia en segundos)
-    nearest = fetchall(cur, '''
-        SELECT "Id","Name"
-        FROM "Management"."WorkstationDemandTemplates"
-        ORDER BY LEAST(
-                   ABS(EXTRACT(EPOCH FROM (COALESCE("StartDate", %s)::timestamp - %s::timestamp))),
-                   ABS(EXTRACT(EPOCH FROM (COALESCE("EndDate",   %s)::timestamp - %s::timestamp)))
-               ) ASC,
-               COALESCE("DateCreated", '-infinity'::timestamptz) DESC
-        LIMIT 1
-    ''', (week_start, week_start, week_end, week_end))
-    if not nearest:
-        raise DataNotFoundError("No se encontró ninguna plantilla de demanda")
-    return nearest[0]
+    # 2) Por activo único
+    cur.execute(
+        'SELECT "Id","Name" FROM "Management"."WorkstationDemandTemplates" WHERE "IsActive"')
+    act = cur.fetchall()
+    if not act:
+        raise DataNotFoundError(
+            "No existe plantilla por rango ni plantilla activa")
+    if len(act) > 1:
+        raise DataIntegrityError(
+            "Existen múltiples plantillas activas; deja sólo una activa")
+    return act[0]
 
 # ───────── CARGA DATOS ─────────
+
+
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
@@ -172,7 +184,8 @@ def load_data(week_start: date):
             ORDER BY d."Day", d."StartTime"
         ''', (week_start, tpl_id))]
         if not demands:
-            raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
+            raise DataNotFoundError(
+                "La plantilla seleccionada no tiene demandas")
 
         # Empleados
         emps = {r[0]: Emp(r) for r in fetchall(cur, '''
@@ -197,12 +210,13 @@ def load_data(week_start: date):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
         # Restricciones semanales
-        for uid,dow,rt,f,t in fetchall(cur, '''
+        for uid, dow, rt, f, t in fetchall(cur, '''
             SELECT "UserId","DayOfWeek","RestrictionType",
                    "AvailableFrom","AvailableUntil"
             FROM "Management"."EmployeeScheduleRestrictions"
         '''):
-            if uid not in emps: continue
+            if uid not in emps:
+                continue
             if rt == 0:
                 emps[uid].day_off.add(dow)
             elif f and t:
@@ -210,13 +224,14 @@ def load_data(week_start: date):
                                               (datetime.min + t).time()))
 
         # Restricciones exactas
-        for uid,d,rt,f,t in fetchall(cur, '''
+        for uid, d, rt, f, t in fetchall(cur, '''
             SELECT "UserId","Date","RestrictionType",
                    "AvailableFrom","AvailableUntil"
             FROM "Management"."EmployeeScheduleExceptions"
             WHERE "Date" BETWEEN %s AND %s
         ''', (week_start, week_end)):
-            if uid not in emps: continue
+            if uid not in emps:
+                continue
             if rt == 0:
                 emps[uid].absent.add(d)
             elif f and t:
@@ -224,31 +239,35 @@ def load_data(week_start: date):
                                          (datetime.min + t).time()))
 
         # Licencias → VAC
-        for uid,sd,ed in fetchall(cur, '''
+        for uid, sd, ed in fetchall(cur, '''
             SELECT "UserId","StartDate"::date,
                    COALESCE("EndDate"::date,%s)
             FROM "Management"."Licenses"
             WHERE "StartDate"::date <= %s
               AND COALESCE("EndDate"::date,%s) >= %s
         ''', (week_end, week_end, week_end, week_start)):
-            if uid not in emps: continue
+            if uid not in emps:
+                continue
             d = max(sd, week_start)
             while d <= ed:
-                emps[uid].absent.add(d); emps[uid].abs_reason[d] = 'VAC'
+                emps[uid].absent.add(d)
+                emps[uid].abs_reason[d] = 'VAC'
                 d += timedelta(days=1)
 
         # Ausentismos → ABS
-        for uid,sd,ed in fetchall(cur, '''
+        for uid, sd, ed in fetchall(cur, '''
             SELECT "UserId","StartDate"::date,
                    COALESCE("EndDate"::date,%s)
             FROM "Management"."UserAbsenteeisms"
             WHERE "StartDate"::date <= %s
               AND COALESCE("EndDate"::date,%s) >= %s
         ''', (week_end, week_end, week_end, week_start)):
-            if uid not in emps: continue
+            if uid not in emps:
+                continue
             d = max(sd, week_start)
             while d <= ed:
-                emps[uid].absent.add(d); emps[uid].abs_reason[d] = 'ABS'
+                emps[uid].absent.add(d)
+                emps[uid].abs_reason[d] = 'ABS'
                 d += timedelta(days=1)
 
         # Turnos obligatorios (UserShifts) — prioridad
@@ -263,13 +282,14 @@ def load_data(week_start: date):
             if not (week_start <= shift_date <= week_end):
                 continue
             for blk in (blk1, blk2):
-                if blk is None: continue
+                if blk is None:
+                    continue
                 blk_time = (datetime.min + blk).time()
                 for dm in demands:
                     if (dm.date == shift_date and dm.start == blk_time and
                         emps[uid].can(dm.wsid) and
                         emps[uid].available(dm.date, dm.start, dm.end) and
-                        dm.need > 0):
+                            dm.need > 0):
                         fixed[shift_date].append((emps[uid], dm))
                         dm.need -= 1
                         break
@@ -278,92 +298,109 @@ def load_data(week_start: date):
     return list(emps.values()), demands, tpl_name, week, fixed
 
 # ───────── SOLVER ─────────
+
+
 def to_min(t): return t.hour*60+t.minute
-def overlap(a,b): return not (a.end<=b.start or b.end<=a.start)
+def overlap(a, b): return not (a.end <= b.start or b.end <= a.start)
+
 
 def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
-    mdl = cp_model.CpModel(); X = {}
+    mdl = cp_model.CpModel()
+    X = {}
     for d in dem:
         for e in emps:
             if e.can(d.wsid) and e.available(d.date, d.start, d.end):
-                X[e.id,d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
-    if not X: raise ScheduleGenerationError("Sin variables: nadie puede cubrir demandas")
+                X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
+    if not X:
+        raise ScheduleGenerationError(
+            "Sin variables: nadie puede cubrir demandas")
 
     # cubrir demanda
     for d in dem:
-        mdl.Add(sum(X[e.id,d.id] for e in emps if (e.id,d.id) in X) == d.need)
+        mdl.Add(sum(X[e.id, d.id]
+                for e in emps if (e.id, d.id) in X) == d.need)
 
     # no solapamiento
     by_day = defaultdict(list)
-    for d in dem: by_day[d.date].append(d)
+    for d in dem:
+        by_day[d.date].append(d)
     for lst in by_day.values():
         for i in range(len(lst)):
             for j in range(i+1, len(lst)):
                 if overlap(lst[i], lst[j]):
                     for e in emps:
-                        if (e.id,lst[i].id) in X and (e.id,lst[j].id) in X:
-                            mdl.Add(X[e.id,lst[i].id] + X[e.id,lst[j].id] <= 1)
+                        if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
+                            mdl.Add(X[e.id, lst[i].id] +
+                                    X[e.id, lst[j].id] <= 1)
 
     # límites/día
     for e in emps:
         for d in week:
-            vs = [X[e.id,dm.id] for dm in dem if dm.date == d and (e.id,dm.id) in X]
+            vs = [X[e.id, dm.id]
+                  for dm in dem if dm.date == d and (e.id, dm.id) in X]
             if vs:
-                maxs = MAX_SHIFTS_HYBRID if e.is_hybrid() else MAX_SHIFTS_SPLIT if e.split else MAX_SHIFTS_CONTINUOUS
+                maxs = MAX_SHIFTS_HYBRID if e.is_hybrid(
+                ) else MAX_SHIFTS_SPLIT if e.split else MAX_SHIFTS_CONTINUOUS
                 mdl.Add(sum(vs) <= maxs)
 
     # máx días/sem
     for e in emps:
-        mdl.Add(sum(X[e.id,d.id] for d in dem if (e.id,d.id) in X) <= MAX_DAYS_PER_WEEK)
+        mdl.Add(sum(X[e.id, d.id]
+                for d in dem if (e.id, d.id) in X) <= MAX_DAYS_PER_WEEK)
 
     # descanso ≥9h
     for e in emps:
         for a in dem:
             for b in dem:
-                if b.date == a.date + timedelta(days=1) and (e.id,a.id) in X and (e.id,b.id) in X:
+                if b.date == a.date + timedelta(days=1) and (e.id, a.id) in X and (e.id, b.id) in X:
                     if (24*60 - to_min(a.end)) + to_min(b.start) < MIN_HOURS_BETWEEN_SHIFTS*60:
-                        mdl.Add(X[e.id,a.id] + X[e.id,b.id] <= 1)
+                        mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
 
     # bloques partidos ≥4h
     for e in emps:
-        if not e.split: continue
+        if not e.split:
+            continue
         for d in by_day:
             lst = [dm for dm in dem if dm.date == d]
             for i in range(len(lst)):
                 for j in range(i+1, len(lst)):
-                    a,b = lst[i], lst[j]
-                    if (e.id,a.id) in X and (e.id,b.id) in X and not overlap(a,b):
+                    a, b = lst[i], lst[j]
+                    if (e.id, a.id) in X and (e.id, b.id) in X and not overlap(a, b):
                         if 0 < (to_min(b.start)-to_min(a.end))/60 < MIN_HOURS_BETWEEN_SPLIT:
-                            mdl.Add(X[e.id,a.id] + X[e.id,b.id] <= 1)
+                            mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
 
-    sol = cp_model.CpSolver(); sol.parameters.max_time_in_seconds = 120
+    sol = cp_model.CpSolver()
+    sol.parameters.max_time_in_seconds = 120
     if sol.Solve(mdl) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise ScheduleGenerationError("Modelo sin solución")
 
     out = defaultdict(list)
     for d in dem:
         for e in emps:
-            if (e.id,d.id) in X and sol.Value(X[e.id,d.id]):
-                out[d.date].append((e,d))
+            if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
+                out[d.date].append((e, d))
     return out
 
 # ───────── OBSERVACIONES ─────────
-def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
-    # Si esta fila es de turno fijo → nunca BT/C
-    if (emp.id, dm.id) in fixed_ids:
+
+
+def calc_obs(emp: Emp, d: date, assigns: list, fixed_ids: set):
+    for e, dm in assigns:
+        if e.id == emp.id and (e.id, dm.id) in fixed_ids:
+            return ""          # turno fijo jamás lleva BT/C
+    cnt = sum(1 for e, _ in assigns if e.id == emp.id)
+    if cnt == 1:
         return ""
-    # Capacidad del día para el empleado
-    cnt  = sum(1 for e, _ in assigns_day if e.id == emp.id)
     maxs = MAX_SHIFTS_HYBRID if emp.is_hybrid() else \
-           MAX_SHIFTS_SPLIT  if emp.split      else MAX_SHIFTS_CONTINUOUS
+        MAX_SHIFTS_SPLIT if emp.split else MAX_SHIFTS_CONTINUOUS
     return "BT" if cnt < maxs else "C"
 
 # ───────── GENERAR HORARIO ─────────
+
+
 def generate(week_start: date):
     emps, demands, tpl, week, fixed = load_data(week_start)
     sched = solve(emps, demands, week)
-
-    # añadir turnos fijos
     for d, lst in fixed.items():
         sched[d].extend(lst)
 
@@ -407,48 +444,55 @@ def generate(week_start: date):
                 "employee_id":   str(emp.id),
                 "employee_name": emp.name,
                 "workstation_id":  str(dm.wsid),
-                "workstation_name":dm.wsname,
+                "workstation_name": dm.wsname,
                 "start_time":    "--" if dm.wsid == ABS_WS_ID else dm.start.strftime("%H:%M"),
                 "end_time":      "--" if dm.wsid == ABS_WS_ID else dm.end.strftime("%H:%M"),
                 "observation":   "VAC" if dm.wsid == ABS_WS_ID and emp.abs_reason.get(d) == "VAC"
                                  else "ABS" if dm.wsid == ABS_WS_ID
-                                 else calc_obs(emp, dm, sched[d], fixed_ids)
+                                 else calc_obs(emp, d, sched[d], fixed_ids)
             })
 
     return res, sched, emps, week, fixed_ids
 
 # ───────── ENDPOINTS ─────────
+
+
 @app.route('/api/health')
 def health():
-    st = {"status":"checking","timestamp":now().isoformat(),"version":"3.7","checks":{}}
+    st = {"status": "checking", "timestamp": now().isoformat(),
+          "version": "3.6", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
-            st["checks"]["database"] = {"status":"healthy","version":cur.fetchone()[0].split(',')[0]}
-            st["status"]="healthy"
+            st["checks"]["database"] = {"status": "healthy", "version": cur.fetchone()[
+                0].split(',')[0]}
+            st["status"] = "healthy"
     except Exception as e:
-        st["checks"]["database"] = {"status":"unhealthy","message":str(e)}
-        st["status"]="unhealthy"
-    return jsonify(st), 200 if st["status"]=="healthy" else 503
+        st["checks"]["database"] = {"status": "unhealthy", "message": str(e)}
+        st["status"] = "unhealthy"
+    return jsonify(st), 200 if st["status"] == "healthy" else 503
+
 
 @app.route('/api/agenda/preview')
 def preview():
     wk = request.args.get('week_start')
-    if not wk: return jsonify({"error":"Falta week_start"}), 400
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
     try:
         ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
     except ValueError:
-        return jsonify({"error":"Fecha inválida"}), 400
+        return jsonify({"error": "Fecha inválida"}), 400
     try:
         res, _, _, _, _ = generate(ws)
         return jsonify(res), 200
     except (DatabaseConnectionError, DataNotFoundError, ScheduleGenerationError) as e:
         return jsonify({"error": str(e)}), 400
 
+
 @app.route('/api/agenda/save', methods=['POST'])
 def save():
-    data  = request.get_json() or {}
-    wk    = data.get('week_start')
+    data = request.get_json() or {}
+    wk = data.get('week_start')
     force = data.get('force', False)
     if not wk:
         return jsonify({"error": "Falta week_start"}), 400
@@ -472,7 +516,8 @@ def save():
             if cur.fetchone()[0] and not force:
                 return jsonify({"error": "Horario ya existe para esa semana"}), 409
             if force:
-                cur.execute('DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
+                cur.execute(
+                    'DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
 
             # insertar filas
             for d, ass in sched.items():
@@ -495,9 +540,11 @@ def save():
                                  "IsDeleted","DateCreated")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ''', (uid(), d, str(emp.id), str(dm.wsid),
-                              timedelta(hours=dm.start.hour, minutes=dm.start.minute),
-                              timedelta(hours=dm.end.hour,   minutes=dm.end.minute),
-                              calc_obs(emp, dm, ass, fixed_ids),
+                              timedelta(hours=dm.start.hour,
+                                        minutes=dm.start.minute),
+                              timedelta(hours=dm.end.hour,
+                                        minutes=dm.end.minute),
+                              calc_obs(emp, d, ass, fixed_ids),
                               False, now()))
             c.commit()
     except Exception as e:
@@ -505,9 +552,10 @@ def save():
 
     return jsonify({"message": "Horario guardado", **res}), 201
 
+
 # ───────── MAIN ─────────
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.7 ↗ http://localhost:5000")
+    print("🚀 API Gandarías v3.6 ↗ http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
