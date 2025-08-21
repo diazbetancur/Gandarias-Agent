@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.6   (31-jul-2025)
+AGENDA GENERATOR API – Gandarías v3.7   (21-ago-2025)
 
 • Selección de plantilla:
     1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
     2) Si no existe, usar la única plantilla con IsActive = TRUE
 • Turnos obligatorios (UserShifts) → prioridad, sin BT/C.
-• VAC / ABS visibles en preview y guardados en BD (Workstation “AUSENCIA”).
+• VAC / ABS visibles en preview y guardados en BD (Workstation "AUSENCIA").
+• NUEVO: Solver flexible que permite cobertura parcial cuando no hay suficientes empleados.
 """
 
 import logging
@@ -26,8 +27,6 @@ from psycopg2 import DataError, OperationalError, ProgrammingError
 app = Flask(__name__)
 CORS(app)
 
-# Esto es un cambio para despliegue de nuevo
-
 # ───────── BD CONFIG ─────────
 DB = {
     "host":     "gandarias-db.postgres.database.azure.com",
@@ -37,8 +36,6 @@ DB = {
     "password": "Gandarias1.",
     "sslmode":  "require",
 }
-
-ABS_WS_ID = '00000000-0000-0000-0000-000000000000'   # Puesto AUSENCIA
 
 # ───────── PARÁMETROS ─────────
 MIN_HOURS_BETWEEN_SHIFTS = 9
@@ -104,6 +101,56 @@ class Demand:
         self.need = int(need)
 
 # ───────── HELPERS BD ─────────
+
+# ───────── AGRUPACIÓN DE DEMANDAS ─────────
+def _t2m(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+def _m2t(m: int) -> time:
+    return time(m // 60, m % 60)
+MAX_SHIFT_DURATION_HOURS = 8
+def coalesce_demands(demands, tolerate_gap_min: int = 0):
+    """
+    Une demandas contiguas del mismo día/puesto cuando
+    no hay hueco (o el hueco <= tolerate_gap_min) y el 'need' es igual.
+    Devuelve una nueva lista de Demand con tramos largos.
+    """
+    # Agrupar por (fecha, workstation)
+    by_key = defaultdict(list)
+    for d in demands:
+        by_key[(d.date, d.wsid, d.wsname)].append(d)
+
+    merged = []
+    for (dte, wsid, wsname), items in by_key.items():
+        items.sort(key=lambda x: (_t2m(x.start), _t2m(x.end)))
+        if not items:
+            continue
+
+        curr = items[0]
+        for nxt in items[1:]:
+            # Calcular duración si se une este turno
+            potential_duration_min = _t2m(nxt.end) - _t2m(curr.start)
+            potential_duration_hours = potential_duration_min / 60.0
+            
+            # ¿Mismo need, contiguas Y no excede duración máxima?
+            if (nxt.need == curr.need
+                and _t2m(nxt.start) - _t2m(curr.end) <= tolerate_gap_min
+                and potential_duration_hours <= MAX_SHIFT_DURATION_HOURS):  # ← NUEVA RESTRICCIÓN
+                # Extender el tramo actual
+                curr.end = nxt.end
+            else:
+                merged.append(curr)
+                curr = nxt
+        merged.append(curr)
+
+    # Mantener el mismo tipo (Demand)
+    out = []
+    for d in merged:
+        out.append(Demand((
+            d.id, d.date, d.wsid, d.wsname, d.start, d.end, d.need
+        )))
+    return out
+
 
 
 def conn():
@@ -279,6 +326,7 @@ def load_data(week_start: date):
               AND w."IsActive" AND NOT w."IsDeleted"
             ORDER BY d."Day", d."StartTime"
         ''', (week_start, tpl_id))]
+        demands = coalesce_demands(demands, tolerate_gap_min=0)
         if not demands:
             raise DataNotFoundError(
                 "La plantilla seleccionada no tiene demandas")
@@ -401,6 +449,7 @@ def overlap(a, b): return not (a.end <= b.start or b.end <= a.start)
 
 
 def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
+    """Solver original (estricto) - requiere 100% de cobertura"""
     mdl = cp_model.CpModel()
     X = {}
     for d in dem:
@@ -477,6 +526,152 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
                 out[d.date].append((e, d))
     return out
 
+
+def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
+    """
+    Solver flexible que permite cobertura parcial cuando no hay suficientes empleados.
+    Prioriza maximizar la cobertura real vs. fallar completamente.
+    """
+    mdl = cp_model.CpModel()
+    X = {}
+    
+    # Variables de asignación (mismo que antes)
+    for d in dem:
+        for e in emps:
+            if e.can(d.wsid) and e.available(d.date, d.start, d.end):
+                X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
+    
+    if not X:
+        raise ScheduleGenerationError("Sin variables: nadie puede cubrir demandas")
+
+    # 🔥 CAMBIO CLAVE: Variables de demanda NO cubierta
+    unmet_demand = {}
+    for d in dem:
+        unmet_demand[d.id] = mdl.NewIntVar(0, d.need, f"unmet_{d.id}")
+    
+    # 🔥 NUEVA RESTRICCIÓN: Cubrir lo que se pueda (no obligatorio al 100%)
+    for d in dem:
+        covered = sum(X[e.id, d.id] for e in emps if (e.id, d.id) in X)
+        mdl.Add(covered + unmet_demand[d.id] == d.need)
+    
+    # Restricciones de empleados (mismas que antes)
+    # No solapamiento
+    by_day = defaultdict(list)
+    for d in dem:
+        by_day[d.date].append(d)
+    
+    for lst in by_day.values():
+        for i in range(len(lst)):
+            for j in range(i+1, len(lst)):
+                if overlap(lst[i], lst[j]):
+                    for e in emps:
+                        if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
+                            mdl.Add(X[e.id, lst[i].id] + X[e.id, lst[j].id] <= 1)
+
+    # Límites por día
+    for e in emps:
+        for d in week:
+            vs = [X[e.id, dm.id] for dm in dem if dm.date == d and (e.id, dm.id) in X]
+            if vs:
+                maxs = MAX_SHIFTS_HYBRID if e.is_hybrid() else MAX_SHIFTS_SPLIT if e.split else MAX_SHIFTS_CONTINUOUS
+                mdl.Add(sum(vs) <= maxs)
+
+    # Máximo días por semana
+    for e in emps:
+        mdl.Add(sum(X[e.id, d.id] for d in dem if (e.id, d.id) in X) <= MAX_DAYS_PER_WEEK)
+
+    # Descanso ≥9h entre días
+    for e in emps:
+        for a in dem:
+            for b in dem:
+                if b.date == a.date + timedelta(days=1) and (e.id, a.id) in X and (e.id, b.id) in X:
+                    if (24*60 - to_min(a.end)) + to_min(b.start) < MIN_HOURS_BETWEEN_SHIFTS*60:
+                        mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
+
+    # Bloques partidos ≥4h
+    for e in emps:
+        if not e.split:
+            continue
+        for d in by_day:
+            lst = [dm for dm in dem if dm.date == d]
+            for i in range(len(lst)):
+                for j in range(i+1, len(lst)):
+                    a, b = lst[i], lst[j]
+                    if (e.id, a.id) in X and (e.id, b.id) in X and not overlap(a, b):
+                        if 0 < (to_min(b.start)-to_min(a.end))/60 < MIN_HOURS_BETWEEN_SPLIT:
+                            mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
+
+    # 🎯 OBJETIVO: Minimizar demanda no cubierta (maximizar cobertura)
+    total_unmet = sum(unmet_demand[d.id] for d in dem)
+    mdl.Minimize(total_unmet)
+
+    # Resolver
+    sol = cp_model.CpSolver()
+    sol.parameters.max_time_in_seconds = 120
+    status = sol.Solve(mdl)
+    
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise ScheduleGenerationError("Modelo sin solución factible")
+
+    # Procesar resultados y mostrar estadísticas
+    out = defaultdict(list)
+    coverage_stats = {}
+    
+    for d in dem:
+        covered = sum(1 for e in emps if (e.id, d.id) in X and sol.Value(X[e.id, d.id]))
+        unmet = sol.Value(unmet_demand[d.id])
+        coverage_stats[d.id] = {
+            'demand': d,
+            'covered': covered,
+            'unmet': unmet,
+            'coverage_pct': round((covered / d.need) * 100, 1) if d.need > 0 else 100
+        }
+        
+        # Agregar asignaciones reales
+        for e in emps:
+            if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
+                out[d.date].append((e, d))
+    
+    # Log de cobertura
+    print(f"\n{'='*80}")
+    print(f"📊 REPORTE DE COBERTURA")
+    print(f"{'='*80}")
+    
+    total_demand = sum(d.need for d in dem)
+    total_covered = sum(stats['covered'] for stats in coverage_stats.values())
+    total_unmet = sum(stats['unmet'] for stats in coverage_stats.values())
+    overall_coverage = round((total_covered / total_demand) * 100, 1) if total_demand > 0 else 100
+    
+    print(f"📈 RESUMEN GENERAL:")
+    print(f"   Total demandado: {total_demand:,} turnos")
+    print(f"   Total cubierto:  {total_covered:,} turnos ({overall_coverage}%)")
+    print(f"   Sin cubrir:      {total_unmet:,} turnos")
+    
+    # Mostrar problemas críticos (cobertura < 50%)
+    critical_issues = [stats for stats in coverage_stats.values() if stats['coverage_pct'] < 50]
+    if critical_issues:
+        print(f"\n⚠️  TURNOS CON COBERTURA CRÍTICA (<50%):")
+        for stats in critical_issues:
+            d = stats['demand']
+            print(f"   📅 {d.date} {d.start}-{d.end} {d.wsname}: {stats['covered']}/{d.need} ({stats['coverage_pct']}%)")
+    
+    # Mostrar cobertura por puesto
+    by_workstation = defaultdict(lambda: {'demand': 0, 'covered': 0})
+    for stats in coverage_stats.values():
+        d = stats['demand']
+        by_workstation[d.wsname]['demand'] += d.need
+        by_workstation[d.wsname]['covered'] += stats['covered']
+    
+    print(f"\n📋 COBERTURA POR PUESTO:")
+    for ws_name, data in sorted(by_workstation.items()):
+        pct = round((data['covered'] / data['demand']) * 100, 1) if data['demand'] > 0 else 100
+        status_icon = "🟢" if pct >= 80 else "🟡" if pct >= 50 else "🔴"
+        print(f"   {status_icon} {ws_name}: {data['covered']}/{data['demand']} ({pct}%)")
+    
+    print(f"{'='*80}\n")
+    
+    return out, coverage_stats
+
 # ───────── OBSERVACIONES ─────────
 
 
@@ -511,8 +706,11 @@ def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
     else:
         return ""    # No debería llegar aquí
 
-# También necesitas actualizar la llamada en generate():
+# ───────── FUNCIONES GENERATE ─────────
+
+
 def generate(week_start: date):
+    """Generación original (estricta) - requiere 100% de cobertura"""
     emps, demands, tpl, week, fixed = load_data(week_start)
     sched = solve(emps, demands, week)
     
@@ -528,7 +726,7 @@ def generate(week_start: date):
             if week_start <= d <= week[-1]:
                 pseudo_dm = type("Pseudo", (), {
                     "id":   uid(),
-                    "wsid": ABS_WS_ID,
+                    "wsid": None,
                     "wsname": "AUSENCIA",
                     "start": time(0, 0),
                     "end":   time(0, 0),
@@ -547,7 +745,8 @@ def generate(week_start: date):
             "total_employees": len(emps),
             "total_demands":   total_req,
             "total_assignments": total_ass,
-            "coverage": round(total_ass/total_req*100, 1) if total_req else 0
+            "coverage": round(total_ass/total_req*100, 1) if total_req else 0,
+            "flexible_mode": False
         },
         "schedule": {}
     }
@@ -557,15 +756,98 @@ def generate(week_start: date):
         res["schedule"][k] = []
         for emp, dm in sched.get(d, []):
             res["schedule"][k].append({
-                "employee_id":   str(emp.id),
-                "employee_name": emp.name,
-                "workstation_id":  str(dm.wsid),
+                "employee_id":      str(emp.id),
+                "employee_name":    emp.name,
+                "workstation_id":   (str(dm.wsid) if dm.wsid is not None else None),
                 "workstation_name": dm.wsname,
-                "start_time":    "--" if dm.wsid == ABS_WS_ID else dm.start.strftime("%H:%M"),
-                "end_time":      "--" if dm.wsid == ABS_WS_ID else dm.end.strftime("%H:%M"),
-                "observation":   "VAC" if dm.wsid == ABS_WS_ID and emp.abs_reason.get(d) == "VAC"
-                                 else "ABS" if dm.wsid == ABS_WS_ID
-                                 else calc_obs(emp, dm, sched[d], fixed_ids)  # Pasar dm en lugar de d
+                "start_time":       (dm.start.strftime("%H:%M") if dm.start else None),
+                "end_time":         (dm.end.strftime("%H:%M") if dm.end else None),
+                "observation":      (
+                    "VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
+                    else "ABS" if dm.wsid is None
+                    else calc_obs(emp, dm, sched[d], fixed_ids)
+                )
+            })
+
+    return res, sched, emps, week, fixed_ids
+
+
+def generate_flexible(week_start: date):
+    """
+    Versión flexible de generate() que acepta cobertura parcial
+    """
+    emps, demands, tpl, week, fixed = load_data(week_start)
+    
+    # Usar el solver flexible
+    sched, coverage_stats = solve_flexible(emps, demands, week)
+    
+    # Añadir turnos fijos
+    for d, lst in fixed.items():
+        sched[d].extend(lst)
+
+    fixed_ids = {(e.id, dm.id) for lst in fixed.values() for e, dm in lst}
+
+    # Añadir ausencias/licencias al preview
+    for emp in emps:
+        for d in emp.absent:
+            if week_start <= d <= week[-1]:
+                pseudo_dm = type("Pseudo", (), {
+                    "id": uid(),
+                    "wsid": None,
+                    "wsname": "AUSENCIA",
+                    "start": time(0, 0),
+                    "end": time(0, 0),
+                    "date": d
+                })()
+                sched[d].append((emp, pseudo_dm))
+
+    # Calcular estadísticas actualizadas
+    total_req = sum(dm.need for dm in demands) + len(fixed_ids)
+    total_covered = sum(stats['covered'] for stats in coverage_stats.values()) + len(fixed_ids)
+    total_ass = sum(len(v) for v in sched.values())
+
+    res = {
+        "template": tpl,
+        "week_start": week_start.isoformat(),
+        "week_end": (week_start + timedelta(days=6)).isoformat(),
+        "summary": {
+            "total_employees": len(emps),
+            "total_demands": total_req,
+            "total_covered": total_covered,
+            "total_assignments": total_ass,
+            "coverage": round(total_covered/total_req*100, 1) if total_req else 0,
+            "flexible_mode": True  # Indicador de que se usó modo flexible
+        },
+        "coverage_details": {
+            stats['demand'].id: {
+                'workstation': stats['demand'].wsname,
+                'date': stats['demand'].date.isoformat(),
+                'time': f"{stats['demand'].start}-{stats['demand'].end}",
+                'demanded': stats['demand'].need,
+                'covered': stats['covered'],
+                'unmet': stats['unmet'],
+                'coverage_pct': stats['coverage_pct']
+            } for stats in coverage_stats.values()
+        },
+        "schedule": {}
+    }
+
+    for d in week:
+        k = d.isoformat()
+        res["schedule"][k] = []
+        for emp, dm in sched.get(d, []):
+            res["schedule"][k].append({
+                "employee_id": str(emp.id),
+                "employee_name": emp.name,
+                "workstation_id": (str(dm.wsid) if dm.wsid is not None else None),
+                "workstation_name": dm.wsname,
+                "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
+                "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
+                "observation": (
+                    "VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
+                    else "ABS" if dm.wsid is None
+                    else calc_obs(emp, dm, sched[d], fixed_ids)
+                )
             })
 
     return res, sched, emps, week, fixed_ids
@@ -576,7 +858,7 @@ def generate(week_start: date):
 @app.route('/api/health')
 def health():
     st = {"status": "checking", "timestamp": now().isoformat(),
-          "version": "3.6", "checks": {}}
+          "version": "3.7", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -592,14 +874,20 @@ def health():
 @app.route('/api/agenda/preview')
 def preview():
     wk = request.args.get('week_start')
+    flexible = request.args.get('flexible', 'true').lower() == 'true'  # Por defecto flexible
+    
     if not wk:
         return jsonify({"error": "Falta week_start"}), 400
     try:
         ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
     except ValueError:
         return jsonify({"error": "Fecha inválida"}), 400
+    
     try:
-        res, _, _, _, _ = generate(ws)
+        if flexible:
+            res, _, _, _, _ = generate_flexible(ws)
+        else:
+            res, _, _, _, _ = generate(ws)  # Versión original (estricta)
         return jsonify(res), 200
     except (DatabaseConnectionError, DataNotFoundError, ScheduleGenerationError) as e:
         return jsonify({"error": str(e)}), 400
@@ -610,6 +898,8 @@ def save():
     data = request.get_json() or {}
     wk = data.get('week_start')
     force = data.get('force', False)
+    flexible = data.get('flexible', True)  # Por defecto flexible
+    
     if not wk:
         return jsonify({"error": "Falta week_start"}), 400
     try:
@@ -619,59 +909,201 @@ def save():
     we = ws + timedelta(days=6)
 
     try:
-        res, sched, emps, week, fixed_ids = generate(ws)
+        if flexible:
+            res, sched, emps, week, fixed_ids = generate_flexible(ws)
+        else:
+            res, sched, emps, week, fixed_ids = generate(ws)
     except (DatabaseConnectionError, DataNotFoundError, ScheduleGenerationError) as e:
         return jsonify({"error": str(e)}), 400
 
     try:
         with conn() as c, c.cursor() as cur:
+            # ¿Existe horario previo para la semana?
             cur.execute('''
                 SELECT COUNT(*) FROM "Management"."Schedules"
                 WHERE "Date" BETWEEN %s AND %s
             ''', (ws, we))
             if cur.fetchone()[0] and not force:
                 return jsonify({"error": "Horario ya existe para esa semana"}), 409
+
             if force:
                 cur.execute(
-                    'DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
+                    'DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s',
+                    (ws, we)
+                )
 
-            # insertar filas
+            # Insertar cada asignación
             for d, ass in sched.items():
                 for emp, dm in ass:
-                    if dm.wsid == ABS_WS_ID:
+                    if dm.wsid is None:
+                        # AUSENCIAS
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
                                  "StartTime","EndTime","Observation",
                                  "IsDeleted","DateCreated")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (uid(), d, str(emp.id), ABS_WS_ID,
-                              None, None, emp.abs_reason.get(d, 'ABS'),
-                              False, now()))
+                        ''', (
+                            uid(), d, str(emp.id), None,
+                            None, None,
+                            emp.abs_reason.get(d, 'ABS'),
+                            False, now()
+                        ))
                     else:
+                        # Turno normal
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
                                  "StartTime","EndTime","Observation",
                                  "IsDeleted","DateCreated")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (uid(), d, str(emp.id), str(dm.wsid),
-                              timedelta(hours=dm.start.hour,
-                                        minutes=dm.start.minute),
-                              timedelta(hours=dm.end.hour,
-                                        minutes=dm.end.minute),
-                              calc_obs(emp, d, ass, fixed_ids),
-                              False, now()))
+                        ''', (
+                            uid(), d, str(emp.id), str(dm.wsid),
+                            timedelta(hours=dm.start.hour, minutes=dm.start.minute),
+                            timedelta(hours=dm.end.hour, minutes=dm.end.minute),
+                            calc_obs(emp, dm, ass, fixed_ids),
+                            False, now()
+                        ))
             c.commit()
     except Exception as e:
         return jsonify({"error": "Error al guardar", "detail": str(e)}), 500
 
-    return jsonify({"message": "Horario guardado", **res}), 201
+    message = "Horario guardado con cobertura flexible" if flexible else "Horario guardado"
+    return jsonify({"message": message, **res}), 201
+
+
+@app.route('/api/agenda/diagnostics')
+def diagnostics():
+    """
+    Endpoint para diagnosticar problemas de cobertura antes de generar horarios
+    """
+    wk = request.args.get('week_start')
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
+    try:
+        ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
+    except ValueError:
+        return jsonify({"error": "Fecha inválida"}), 400
+
+    try:
+        emps, demands, tpl, week, fixed = load_data(ws)
+        
+        # Análizar capacidad vs demanda por puesto
+        workstation_analysis = defaultdict(lambda: {
+            'total_demand': 0,
+            'available_employees': 0,
+            'employee_names': [],
+            'max_theoretical_coverage': 0,
+            'issues': []
+        })
+        
+        for d in demands:
+            workstation_analysis[d.wsname]['total_demand'] += d.need
+        
+        for emp in emps:
+            for ws_id in emp.roles:
+                # Buscar nombre del workstation
+                ws_name = next((d.wsname for d in demands if d.wsid == ws_id), None)
+                if ws_name:
+                    workstation_analysis[ws_name]['available_employees'] += 1
+                    workstation_analysis[ws_name]['employee_names'].append(emp.name)
+        
+        # Calcular cobertura teórica máxima
+        for ws_name, data in workstation_analysis.items():
+            # Asumiendo que cada empleado puede trabajar máximo 6 días x 2 turnos = 12 turnos/semana
+            max_coverage = data['available_employees'] * 12
+            data['max_theoretical_coverage'] = min(max_coverage, data['total_demand'])
+            
+            coverage_pct = (data['max_theoretical_coverage'] / data['total_demand'] * 100) if data['total_demand'] > 0 else 100
+            
+            if coverage_pct < 50:
+                data['issues'].append(f"CRÍTICO: Solo {coverage_pct:.1f}% de cobertura posible")
+            elif coverage_pct < 80:
+                data['issues'].append(f"ADVERTENCIA: Solo {coverage_pct:.1f}% de cobertura posible")
+            
+            if data['available_employees'] == 0:
+                data['issues'].append("Sin empleados capacitados")
+            elif data['available_employees'] < 3:
+                data['issues'].append(f"Muy pocos empleados ({data['available_employees']})")
+
+        return jsonify({
+            "template": tpl,
+            "week_start": ws.isoformat(),
+            "analysis": dict(workstation_analysis),
+            "recommendations": [
+                "Usar modo flexible si hay problemas de cobertura",
+                "Capacitar más empleados en puestos críticos",
+                "Revisar si las demandas son realistas"
+            ]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agenda/comparison')
+def comparison():
+    """
+    Endpoint para comparar resultados entre modo estricto y flexible
+    """
+    wk = request.args.get('week_start')
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
+    try:
+        ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
+    except ValueError:
+        return jsonify({"error": "Fecha inválida"}), 400
+
+    try:
+        # Intentar modo estricto
+        strict_result = None
+        strict_error = None
+        try:
+            strict_result, _, _, _, _ = generate(ws)
+        except Exception as e:
+            strict_error = str(e)
+        
+        # Intentar modo flexible
+        flexible_result = None
+        flexible_error = None
+        try:
+            flexible_result, _, _, _, _ = generate_flexible(ws)
+        except Exception as e:
+            flexible_error = str(e)
+
+        return jsonify({
+            "week_start": ws.isoformat(),
+            "strict_mode": {
+                "success": strict_result is not None,
+                "error": strict_error,
+                "result": strict_result
+            },
+            "flexible_mode": {
+                "success": flexible_result is not None,
+                "error": flexible_error,
+                "result": flexible_result
+            },
+            "recommendation": (
+                "Usar modo flexible" if strict_error and not flexible_error
+                else "Ambos modos funcionan, usar estricto para cobertura completa"
+                if not strict_error and not flexible_error
+                else "Revisar configuración - ambos modos fallan"
+            )
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ───────── MAIN ─────────
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
+
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.6 ↗ http://localhost:5000")
+    print("🚀 API Gandarías v3.7 ↗ http://localhost:5000")
+    print("📋 Nuevas funcionalidades:")
+    print("   • Solver flexible para cobertura parcial")
+    print("   • Endpoint /api/agenda/diagnostics")
+    print("   • Endpoint /api/agenda/comparison") 
+    print("   • Parámetros flexible=true/false en preview y save")
     app.run(host="0.0.0.0", port=5000, debug=True)
