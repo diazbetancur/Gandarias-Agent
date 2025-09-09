@@ -33,11 +33,11 @@ CORS(app)
 
 # ───────── BD CONFIG ─────────
 DB = {
-    "host":     "gandarias-db.postgres.database.azure.com",
+    "host":     "database-gandarias.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com",
     "port":     5432,
     "dbname":   "postgres",
-    "user":     "Admingandarias",
-    "password": "Gandarias1.",
+    "user":     "postgres",
+    "password": "MyStrongPassword!123_",
     "sslmode":  "require",
 }
 
