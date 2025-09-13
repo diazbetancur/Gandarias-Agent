@@ -1,21 +1,18 @@
-version: "3.9"
+version: '3.9'
 
 services:
   api:
     build: .
     container_name: gandarias-agenda-api
     ports:
-      - "5000:5000"
+      - '5000:5000'
     environment:
-     
-      DB_HOST: gandarias-db.postgres.database.azure.com
+      DB_HOST: database-gandarias.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com
       DB_PORT: 5432
       DB_NAME: postgres
-      DB_USER: Admingandarias
-      DB_PASSWORD: Gandarias1.
+      DB_USER: postgres
+      DB_PASSWORD: MyStrongPassword!123_
       DB_SSLMODE: require
     restart: unless-stopped
 
     tty: true
-
-
