@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.7   (21-ago-2025)
+AGENDA GENERATOR API – Gandarías v3.7 CORREGIDA   (13-sep-2025)
+
+CORRECCIONES APLICADAS:
+• Fix mapeo de días PostgreSQL (0=Domingo) vs Python weekday (0=Lunes)
+• Debug mejorado para restricciones de empleados
+• Verificación de disponibilidad corregida
+• Logs adicionales para diagnóstico
 
 • Selección de plantilla:
     1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
@@ -59,7 +65,7 @@ class DataNotFoundError(Exception): ...
 class DataIntegrityError(Exception): ...
 class ScheduleGenerationError(Exception): ...
 
-# ───────── MODELOS ─────────
+# ───────── MODELOS CORREGIDOS ─────────
 class Emp:
     def __init__(self, row: Tuple):
         self.id, self.name, self.split = row
@@ -72,14 +78,22 @@ class Emp:
 
     def is_hybrid(self): return len(self.roles) >= 4
     def can(self, ws): return ws in self.roles
-    def off(self, d): return d.weekday() in self.day_off
+    
+    def off(self, d): 
+        # FIX: Convertir Python weekday a PostgreSQL DOW
+        # Python: 0=Lunes, 1=Martes, 2=Miércoles, 3=Jueves, 4=Viernes, 5=Sábado, 6=Domingo
+        # PostgreSQL: 0=Domingo, 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado
+        pg_dow = (d.weekday() + 1) % 7
+        return pg_dow in self.day_off
+    
     def absent_day(self, d): return d in self.absent
 
     def available(self, d, s, e):
         if self.off(d) or self.absent_day(d):
             return False
-        win = self.exc.get(d) or self.window.get(
-            d.weekday(), [(time(0), time(23, 59))])
+        # FIX: También corregir aquí para ventanas de tiempo
+        pg_dow = (d.weekday() + 1) % 7
+        win = self.exc.get(d) or self.window.get(pg_dow, [(time(0), time(23, 59))])
         return any(a <= s and e <= b for a, b in win)
 
 class Demand:
@@ -306,7 +320,7 @@ def pick_template(cur, week_start: date, week_end: date):
     print("\n[PICK_TEMPLATE] ✗ Ninguna candidata cercana tiene demandas > 0")
     raise DataNotFoundError("No se encontró ninguna plantilla con demandas > 0")
 
-# ───────── CARGA DATOS ─────────
+# ───────── CARGA DATOS CORREGIDA ─────────
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
@@ -349,6 +363,10 @@ def load_data(week_start: date):
         if not any(e.roles for e in emps.values()):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
+        # FIX: Cargar restricciones con mapeo correcto y debug mejorado
+        print(f"\n[DEBUG] Cargando restricciones para semana {week_start}")
+        day_names = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+        
         for uid, dow, rt, f, t in fetchall(cur, '''
             SELECT "UserId","DayOfWeek","RestrictionType",
                    "AvailableFrom","AvailableUntil"
@@ -356,11 +374,16 @@ def load_data(week_start: date):
         '''):
             if uid not in emps:
                 continue
+            
+            emp_name = emps[uid].name
+            
             if rt == 0:
                 emps[uid].day_off.add(dow)
+                print(f"[DEBUG] {emp_name} NO TRABAJA {day_names[dow]} (PostgreSQL DOW={dow})")
             elif f and t:
                 emps[uid].window[dow].append(((datetime.min + f).time(),
                                               (datetime.min + t).time()))
+                print(f"[DEBUG] {emp_name} disponible {day_names[dow]} {f}-{t}")
 
         for uid, d, rt, f, t in fetchall(cur, '''
             SELECT "UserId","Date","RestrictionType",
@@ -372,6 +395,7 @@ def load_data(week_start: date):
                 continue
             if rt == 0:
                 emps[uid].absent.add(d)
+                print(f"[DEBUG] {emps[uid].name} NO TRABAJA excepción {d}")
             elif f and t:
                 emps[uid].exc[d].append(((datetime.min + f).time(),
                                          (datetime.min + t).time()))
@@ -406,6 +430,19 @@ def load_data(week_start: date):
                 emps[uid].abs_reason[d] = 'ABS'
                 d += timedelta(days=1)
 
+        # DEBUG: Verificar empleados específicos
+        print(f"\n[DEBUG] Verificando empleados críticos para semana {week_start}:")
+        for uid, emp in emps.items():
+            if any(name in emp.name.upper() for name in ['KARIN', 'NAIARA']):
+                print(f"\n[DEBUG] {emp.name}:")
+                print(f"  - Días libres PostgreSQL: {emp.day_off}")
+                print(f"  - Roles: {len(emp.roles)} puestos")
+                for d in week:
+                    pg_dow = (d.weekday() + 1) % 7
+                    is_off = emp.off(d)
+                    day_name = d.strftime('%A')
+                    print(f"    {d} ({day_name}) - PG_DOW={pg_dow} - Libre: {is_off}")
+
         fixed = defaultdict(list)
         for uid, day, blk1, blk2 in fetchall(cur, '''
             SELECT "UserId","Day","Block1Start","Block2Start"
@@ -430,9 +467,27 @@ def load_data(week_start: date):
                         break
         demands = [d for d in demands if d.need > 0]
 
+        # DEBUG: Análisis de cobertura
+        print(f"\n[DEBUG] Análisis de cobertura por puesto:")
+        by_workstation = defaultdict(lambda: {'demands': 0, 'employees': 0, 'names': []})
+        for d in demands:
+            by_workstation[d.wsname]['demands'] += d.need
+        for emp in emps.values():
+            for ws_id in emp.roles:
+                ws_name = next((d.wsname for d in demands if d.wsid == ws_id), None)
+                if ws_name:
+                    by_workstation[ws_name]['employees'] += 1
+                    by_workstation[ws_name]['names'].append(emp.name)
+        
+        for ws_name, data in sorted(by_workstation.items()):
+            if data['demands'] > 0:
+                ratio = data['employees'] / data['demands'] if data['demands'] > 0 else 0
+                status = "✓" if data['employees'] >= data['demands'] else "⚠"
+                print(f"  {status} {ws_name}: {data['employees']} empleados / {data['demands']} demandas (ratio: {ratio:.2f})")
+
     return list(emps.values()), demands, tpl_name, week, fixed
 
-# ───────── SOLVER ─────────
+# ───────── SOLVER (sin cambios) ─────────
 def to_min(t): return t.hour*60+t.minute
 def overlap(a, b): return not (a.end <= b.start or b.end <= a.start)
 
@@ -701,7 +756,7 @@ def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
     else:
         return "BT"
 
-# ───────── GENERATE ─────────
+# ───────── GENERATE CORREGIDO ─────────
 def generate(week_start: date):
     emps, demands, tpl, week, fixed = load_data(week_start)
     sched = solve(emps, demands, week)
@@ -833,7 +888,7 @@ def generate_flexible(week_start: date):
 @app.route('/api/health')
 def health():
     st = {"status": "checking", "timestamp": now().isoformat(),
-          "version": "3.7", "checks": {}}
+          "version": "3.7-CORREGIDA", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -1048,8 +1103,13 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.7 ↗ http://localhost:5000")
-    print("📋 Nuevas funcionalidades:")
+    print("🚀 API Gandarías v3.7 CORREGIDA ↗ http://localhost:5000")
+    print("🔧 CORRECCIONES APLICADAS:")
+    print("   • Fix mapeo días PostgreSQL (0=Domingo) vs Python (0=Lunes)")
+    print("   • Debug mejorado para restricciones de empleados")
+    print("   • Verificación de disponibilidad corregida")
+    print("   • Logs adicionales para diagnóstico")
+    print("📋 Funcionalidades:")
     print("   • Solver flexible para cobertura parcial")
     print("   • Máximo 2 bloques por día (continuidad cuenta como 1)")
     print("   • 9h/día duras en estricto, flex en flexible (penalizadas)")
