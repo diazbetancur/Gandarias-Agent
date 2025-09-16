@@ -1,13 +1,14 @@
-# Imagen oficial para Lambda Python 3.12
+
+# Usar el runtime oficial de AWS Lambda Python
 FROM public.ecr.aws/lambda/python:3.12
 
-# Instala dependencias
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt
+# Copiar requirements e instalar dependencias
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# Copia tu código
-COPY agenda.py .
-COPY handler.py .
+# Copiar el código de tu aplicación
+COPY agenda.py ${LAMBDA_TASK_ROOT}/
+COPY handler.py ${LAMBDA_TASK_ROOT}/
 
-# Handler de Lambda (module.function)
-CMD [ "handler.handler" ]
+# Establecer el handler
+CMD ["handler.handler"]

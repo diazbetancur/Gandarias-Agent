@@ -90,11 +90,34 @@ class Emp:
 
     def available(self, d, s, e):
         if self.off(d) or self.absent_day(d):
+            if 'KARIN' in self.name or 'NAIARA' in self.name:
+                print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: OFF o AUSENTE")
             return False
-        # FIX: También corregir aquí para ventanas de tiempo
+
         pg_dow = (d.weekday() + 1) % 7
-        win = self.exc.get(d) or self.window.get(pg_dow, [(time(0), time(23, 59))])
-        return any(a <= s and e <= b for a, b in win)
+        win = self.exc.get(d) or self.window.get(pg_dow)
+
+        if not win:
+            if 'KARIN' in self.name or 'NAIARA' in self.name:
+                print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: SIN VENTANAS")
+            return False
+
+        # Validar contra ventanas
+        for a, b in win:
+            # Si el turno cruza medianoche (ej: 21:00–00:00) → tratar 00:00 como 24:00
+            end = e
+            if end == time(0, 0):
+                end = time(23, 59)
+
+            if s >= a and end <= b:
+                if 'KARIN' in self.name or 'NAIARA' in self.name:
+                    print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: dentro de ventana {a}-{b}")
+                return True
+
+        if 'KARIN' in self.name or 'NAIARA' in self.name:
+            print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: FUERA de ventana {win}")
+        return False
+
 
 class Demand:
     def __init__(self, row: Tuple):
@@ -102,6 +125,7 @@ class Demand:
          self.start, self.end, need) = row
         self.date = rdate.date() if hasattr(rdate, 'date') else rdate
         self.need = int(need)
+        self.slot_index = 0
 
 # ───────── HELPERS ─────────
 def _t2m(t: time) -> int:
@@ -116,13 +140,20 @@ def duration_min(dm) -> int:
         end += 24*60
     return end - start
 
-def demand_weight(dm) -> int:
-    """
-    Pondera la importancia de cubrir una demanda.
-    Penaliza más dejar vacíos tramos cortos (micro-turnos).
-    """
-    dur = max(1, duration_min(dm))  # minutos
-    return max(1, 60000 // dur)     # Ej: 30min=2000, 60min=1000, 180min=333
+def demand_weight(dm):
+    dur = max(1, duration_min(dm))
+
+    # 🚩 Paso 1: priorizar al menos un empleado por puesto/día
+    if dm.slot_index == 0:
+        return 500000
+
+    # 🚩 Paso 2: lógica general por duración
+    if dur <= 15:
+        return 100000
+
+    return max(1, 60000 // dur)
+
+
 
 # Alias por compatibilidad (si quedaba alguna referencia antigua)
 dur_min = duration_min
@@ -340,6 +371,16 @@ def load_data(week_start: date):
             ORDER BY d."Day", d."StartTime"
         ''', (week_start, tpl_id))]
         demands = coalesce_demands(demands, tolerate_gap_min=0)
+        # Enumerar demandas por puesto y día
+        by_day_ws = defaultdict(list)
+        for d in demands:
+            by_day_ws[(d.date, d.wsid)].append(d)
+
+        for (_, _), lst in by_day_ws.items():
+            lst.sort(key=lambda x: (x.start, x.end))
+            for idx, d in enumerate(lst):
+                d.slot_index = idx
+
         if not demands:
             raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
 
@@ -378,12 +419,49 @@ def load_data(week_start: date):
             emp_name = emps[uid].name
             
             if rt == 0:
+                # No trabaja
                 emps[uid].day_off.add(dow)
                 print(f"[DEBUG] {emp_name} NO TRABAJA {day_names[dow]} (PostgreSQL DOW={dow})")
-            elif f and t:
-                emps[uid].window[dow].append(((datetime.min + f).time(),
-                                              (datetime.min + t).time()))
-                print(f"[DEBUG] {emp_name} disponible {day_names[dow]} {f}-{t}")
+            elif rt == 1:
+                # Sin restricción - puede trabajar todo el día
+                emps[uid].window[dow].append((time(0, 0), time(23, 59)))
+                print(f"[DEBUG] {emp_name} SIN RESTRICCIÓN {day_names[dow]} - disponible 24h (PostgreSQL DOW={dow})")
+            elif rt == 2:
+                # Restricción de horario específica
+                if f and t:
+                    # Ventana completa: desde f hasta t
+                    emps[uid].window[dow].append(((datetime.min + f).time(), (datetime.min + t).time()))
+                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} {f}-{t} (PostgreSQL DOW={dow})")
+                elif f and not t:
+                    # Solo AvailableFrom: desde esa hora hasta final del día
+                    emps[uid].window[dow].append(((datetime.min + f).time(), time(23, 59)))
+                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} {f}-23:59 (PostgreSQL DOW={dow})")
+                elif not f and t:
+                    # Solo AvailableUntil: desde inicio del día hasta esa hora
+                    emps[uid].window[dow].append((time(0, 0), (datetime.min + t).time()))
+                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} 00:00-{t} (PostgreSQL DOW={dow})")
+                else:
+                    print(f"[WARNING] {emp_name} RestrictionType=2 sin horarios válidos {day_names[dow]}")
+            elif rt == 3:
+                # Disponible hasta cierta hora
+                if t:
+                    emps[uid].window[dow].append((time(0, 0), (datetime.min + t).time()))
+                    print(f"[DEBUG] {emp_name} DISPONIBLE HASTA {day_names[dow]} 00:00-{t} (PostgreSQL DOW={dow})")
+                else:
+                    print(f"[WARNING] {emp_name} RestrictionType=3 sin AvailableUntil {day_names[dow]}")
+            elif rt == 4:
+                # Disponible entre bloques (interpretar como disponible en horario específico)
+                if f and t:
+                    emps[uid].window[dow].append(((datetime.min + f).time(), (datetime.min + t).time()))
+                    print(f"[DEBUG] {emp_name} DISPONIBLE ENTRE BLOQUES {day_names[dow]} {f}-{t} (PostgreSQL DOW={dow})")
+                else:
+                    print(f"[WARNING] {emp_name} RestrictionType=4 sin horarios completos {day_names[dow]}")
+            elif rt == 5:
+                # No disponible entre bloques (marcar como día libre o manejar según necesites)
+                emps[uid].day_off.add(dow)
+                print(f"[DEBUG] {emp_name} NO DISPONIBLE ENTRE BLOQUES {day_names[dow]} - marcado como libre (PostgreSQL DOW={dow})")
+            else:
+                print(f"[WARNING] {emp_name} RestrictionType={rt} desconocido {day_names[dow]}")
 
         for uid, d, rt, f, t in fetchall(cur, '''
             SELECT "UserId","Date","RestrictionType",
@@ -484,6 +562,13 @@ def load_data(week_start: date):
                 ratio = data['employees'] / data['demands'] if data['demands'] > 0 else 0
                 status = "✓" if data['employees'] >= data['demands'] else "⚠"
                 print(f"  {status} {ws_name}: {data['employees']} empleados / {data['demands']} demandas (ratio: {ratio:.2f})")
+            
+            if data['demands'] > 0 and data['employees'] == 0:
+                    print(f"[EVIDENCIA] {ws_name} sin empleados capacitados para cubrir "
+                        f"{data['demands']} demandas en semana {week_start}")
+        
+           
+        
 
     return list(emps.values()), demands, tpl_name, week, fixed
 
@@ -605,8 +690,23 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
 
     for d in dem:
         for e in emps:
-            if e.can(d.wsid) and e.available(d.date, d.start, d.end):
+            can_work = e.can(d.wsid)
+            is_available = e.available(d.date, d.start, d.end)
+            
+            if 'KARIN' in e.name:
+                print(f"[DEBUG] {e.name} - {d.date} {d.start}-{d.end}: can={can_work}, available={is_available}")
+            
+            if can_work and is_available:
                 X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
+                # Refuerzo de disponibilidad como restricción dura
+                for (eid, did), var in list(X.items()):
+                    emp = next(e for e in emps if e.id == eid)
+                    dm = next(d for d in dem if d.id == did)
+                    if not emp.available(dm.date, dm.start, dm.end):
+                        mdl.Add(var == 0)
+
+                if 'KARIN' in e.name:
+                    print(f"[SOLVER] Variable CREADA para {e.name}: {d.date} {d.start}-{d.end} {d.wsname}")
 
     if not X:
         raise ScheduleGenerationError("Sin variables: nadie puede cubrir demandas")
@@ -701,6 +801,12 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
         for e in emps:
             if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
                 out[d.date].append((e, d))
+    for stats in coverage_stats.values():
+        d = stats['demand']
+        if stats['unmet'] > 0:
+            print(f"[EVIDENCIA] {d.date} {d.start}-{d.end} {d.wsname} "
+                f"→ demanda={d.need}, cubierto={stats['covered']}, faltan={stats['unmet']}")
+                
 
     print(f"\n{'='*80}")
     print(f"📊 REPORTE DE COBERTURA")
