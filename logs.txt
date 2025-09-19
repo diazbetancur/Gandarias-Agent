@@ -1,0 +1,155 @@
+﻿API Gandarias v3.8 en http://localhost:5000
+Correcciones: normalizacion de demandas por MAX(need), prioridad 1 persona por puesto/dia, evidencias en logs (ASCII).
+ * Serving Flask app 'agenda'
+ * Debug mode: on
+API Gandarias v3.8 en http://localhost:5000
+Correcciones: normalizacion de demandas por MAX(need), prioridad 1 persona por puesto/dia, evidencias en logs (ASCII).
+============================================================
+[PICK_TEMPLATE] Semana 2025-01-06 a 2025-01-12
+============================================================
+[PICK_TEMPLATE] Plantilla activa: 'PRIMERA DE SEPTIEMBRE'
+
+[DEBUG] Cargando restricciones
+[DEBUG] ANGEL HEYDER DAZA RENDON NO TRABAJA Viernes
+[DEBUG] ANGEL HEYDER DAZA RENDON NO TRABAJA Sabado
+[DEBUG] ANGEL HEYDER DAZA RENDON NO TRABAJA Domingo
+[DEBUG] ARSENIO SAMUEL WILSON RUIZ NO TRABAJA Martes
+[DEBUG] ALVARO AHECHU GONZALEZ NO TRABAJA Lunes
+[DEBUG] ALVARO AHECHU GONZALEZ NO TRABAJA Martes
+[DEBUG] ALVARO AHECHU GONZALEZ NO TRABAJA Miercoles
+[DEBUG] ALVARO AHECHU GONZALEZ NO TRABAJA Jueves
+[DEBUG] ALVARO AHECHU GONZALEZ NO TRABAJA Viernes
+[DEBUG] ENEKO SARASOLA USANDIZAGA NO TRABAJA Martes
+[DEBUG] ENEKO SARASOLA USANDIZAGA NO TRABAJA Domingo
+[DEBUG] JAVIER SAN PEDRO MU├æOZ NO TRABAJA Domingo
+[DEBUG] JULIETH FERNA NORE├æA VALENCIA NO TRABAJA Lunes
+[DEBUG] JULIETH FERNA NORE├æA VALENCIA NO TRABAJA Martes
+[DEBUG] JULIETH FERNA NORE├æA VALENCIA NO TRABAJA Miercoles
+[DEBUG] OLMAN MANUEL AVILA SOLORZANO NO TRABAJA Lunes
+[DEBUG] OLMAN MANUEL AVILA SOLORZANO NO TRABAJA Martes
+[DEBUG] MARIA JOSE ZALACAIN ITURRIOZ NO TRABAJA Lunes
+[DEBUG] MARIA JOSE ZALACAIN ITURRIOZ NO TRABAJA Domingo
+[DEBUG] LAYDA ISABEL IDROVO PARRA NO TRABAJA Domingo
+[DEBUG] BORJA VAQUERIZO ALASTUY NO TRABAJA Martes
+[DEBUG] RONY ALEXIS RIVAS TURCIOS NO TRABAJA Domingo
+[DEBUG] CRISTIANO SIQUEIRA DOS SANTOS NO TRABAJA Domingo
+[DEBUG] MARLON FABRICI RODRIGUEZ COOL NO TRABAJA Martes
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS NO TRABAJA Miercoles
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS NO TRABAJA Jueves
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS NO TRABAJA Martes
+[DEBUG] MARLON FABRICI RODRIGUEZ COOL NO TRABAJA Miercoles
+[DEBUG] FALILOU ADFASDFASDF NO TRABAJA Lunes
+[DEBUG] FALILOU ADFASDFASDF NO TRABAJA Martes
+[DEBUG] FALILOU ADFASDFASDF NO TRABAJA Domingo
+[DEBUG] ENEKO SARASOLA USANDIZAGA NO TRABAJA Lunes
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO NO TRABAJA Lunes
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO NO TRABAJA Martes
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO NO TRABAJA Miercoles
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO NO TRABAJA Jueves
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO NO TRABAJA Viernes
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS NO TRABAJA Domingo
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS NO TRABAJA Lunes
+
+[DEBUG] Resumen restricciones por empleado:
+[DEBUG] SAINE ALHAGI ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] ARTEM DEHTIAR ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] OLGA PATRICIA NORE├æA VALENCIA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] JEAN PIERRE CHICO PALOMINO ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] GAURE MENDOZA DIAZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] MARCELO EDUAR AZOCAR TRINCADO ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] MARILYN BARBERIS LAZO ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] SIHAM BENMUSTAPHA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] MELANIA ANACONA JIMENEZ ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 0))], 2: [(datetime.time(0, 0), datetime.time(23, 0))], 3: [(datetime.time(0, 0), datetime.time(23, 0))], 4: [(datetime.time(0, 0), datetime.time(23, 0))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 0))]}
+[DEBUG] JEFFERSON STALIN MACIAS BUENO ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] DIANA ANGELINA ACOSTA RAMOS ÔåÆ Ventanas semanales: {1: [(datetime.time(16, 0), datetime.time(23, 59))], 2: [(datetime.time(16, 0), datetime.time(23, 59))], 3: [(datetime.time(16, 0), datetime.time(23, 59))], 4: [(datetime.time(16, 0), datetime.time(23, 59))], 5: [(datetime.time(16, 0), datetime.time(23, 59))], 6: [(datetime.time(16, 0), datetime.time(23, 59))], 0: [(datetime.time(16, 0), datetime.time(23, 59))]}
+[DEBUG] ALVARO AHECHU GONZALEZ ÔåÆ Dias libres: [1, 2, 3, 4, 5]
+[DEBUG] ALVARO AHECHU GONZALEZ ÔåÆ Ventanas semanales: {6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] KARLA TATIANA CAEDENAS CAGUA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] OSWALDO MOLINA PLAZA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] JULIETH FERNA NORE├æA VALENCIA ÔåÆ Dias libres: [1, 2, 3]
+[DEBUG] JULIETH FERNA NORE├æA VALENCIA ÔåÆ Ventanas semanales: {4: [(datetime.time(16, 0), datetime.time(23, 59))], 5: [(datetime.time(16, 0), datetime.time(23, 59))], 6: [(datetime.time(16, 0), datetime.time(23, 59))], 0: [(datetime.time(16, 0), datetime.time(23, 59))]}
+[DEBUG] ROSA NEFES BURBANO ZU├æIGA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] OLMAN MANUEL AVILA SOLORZANO ÔåÆ Dias libres: [1, 2]
+[DEBUG] OLMAN MANUEL AVILA SOLORZANO ÔåÆ Ventanas semanales: {3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] RICHARD ISLA LEON ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] ANA CAROLINA FLORES GARCIA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] BORJA VAQUERIZO ALASTUY ÔåÆ Dias libres: [2]
+[DEBUG] BORJA VAQUERIZO ALASTUY ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] JOSE ANTONIO GONZALEZ MARTIN ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] LAYDA ISABEL IDROVO PARRA ÔåÆ Dias libres: [0]
+[DEBUG] LAYDA ISABEL IDROVO PARRA ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(17, 0))], 2: [(datetime.time(0, 0), datetime.time(17, 0))], 3: [(datetime.time(0, 0), datetime.time(17, 0))], 4: [(datetime.time(0, 0), datetime.time(17, 0))], 5: [(datetime.time(0, 0), datetime.time(17, 0))], 6: [(datetime.time(0, 0), datetime.time(17, 0))]}
+[DEBUG] CRISTIAN ZAPATA MORA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] EVA ELIZABETH FOZZATTI MENDEZ ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 0))], 2: [(datetime.time(0, 0), datetime.time(23, 0))], 3: [(datetime.time(0, 0), datetime.time(23, 0))], 4: [(datetime.time(0, 0), datetime.time(23, 0))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 0))]}
+[DEBUG] CRISTIANO SIQUEIRA DOS SANTOS ÔåÆ Dias libres: [0]
+[DEBUG] CRISTIANO SIQUEIRA DOS SANTOS ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 2: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] RUTH DOBU ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 0))], 2: [(datetime.time(0, 0), datetime.time(23, 0))], 3: [(datetime.time(0, 0), datetime.time(23, 0))], 4: [(datetime.time(0, 0), datetime.time(23, 0))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 0))]}
+[DEBUG] ANGEL HEYDER DAZA RENDON ÔåÆ Dias libres: [0, 5, 6]
+[DEBUG] ANGEL HEYDER DAZA RENDON ÔåÆ Ventanas semanales: {1: [(datetime.time(20, 0), datetime.time(23, 59))], 2: [(datetime.time(20, 0), datetime.time(23, 59))], 3: [(datetime.time(20, 0), datetime.time(23, 59))], 4: [(datetime.time(20, 0), datetime.time(23, 59))]}
+[DEBUG] CHRISTIAN JOSE GARCIA GASCON ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] JOSE DANIEL NAVAS LOPEZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] Fichaje Fichaje ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] SUBINA KHAREL SUBINA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] FELIX MACARENO LARRA├æAGA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] IDOIA LERTXUNDI ETXEBERRIA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] ALENNY CHANEL ROSARIO MEDINA ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(19, 30))], 2: [(datetime.time(0, 0), datetime.time(19, 30))], 3: [(datetime.time(0, 0), datetime.time(19, 30))], 4: [(datetime.time(0, 0), datetime.time(19, 30))], 5: [(datetime.time(0, 0), datetime.time(19, 30))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] AHMED ECH CHATBI ECH CHATBI ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] FALILOU ADFASDFASDF ÔåÆ Dias libres: [0, 1, 2]
+[DEBUG] FALILOU ADFASDFASDF ÔåÆ Ventanas semanales: {3: [(datetime.time(20, 0), datetime.time(23, 59))], 4: [(datetime.time(20, 0), datetime.time(23, 59))], 5: [(datetime.time(20, 0), datetime.time(23, 59))], 6: [(datetime.time(20, 0), datetime.time(23, 59))]}
+[DEBUG] YESSY MARIA PEREZ MENDOZA ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] MELVIN ARIEL PE├æALO DE LA PAZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] IULIANA SIMONA RANESCU ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] JAVIER SAN PEDRO MU├æOZ ÔåÆ Dias libres: [0]
+[DEBUG] JAVIER SAN PEDRO MU├æOZ ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 2: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] RONY ALEXIS RIVAS TURCIOS ÔåÆ Dias libres: [0]
+[DEBUG] RONY ALEXIS RIVAS TURCIOS ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 2: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] MIRNA VERONI UMANZOR SANDOVAL ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO ÔåÆ Dias libres: [1, 2, 3, 4, 5]
+[DEBUG] JULEN UNAI PINGARRON ZAMBRANO ÔåÆ Ventanas semanales: {6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] JEAN POOL RUIZ SANCHEZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS ÔåÆ Dias libres: [0, 1, 2, 3, 4]
+[DEBUG] KARIN NOHEMY RODRIGUEZ RODAS ÔåÆ Ventanas semanales: {5: [(datetime.time(17, 0), datetime.time(23, 59))], 6: [(datetime.time(12, 0), datetime.time(15, 0)), (datetime.time(16, 0), datetime.time(20, 0))]}
+[DEBUG] MARIA MAGDALENA POLANCO GEREZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] DANIEL ESTEBAN VASQUEZ SERNA ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 0))], 2: [(datetime.time(0, 0), datetime.time(23, 0))], 3: [(datetime.time(0, 0), datetime.time(23, 0))], 4: [(datetime.time(0, 0), datetime.time(23, 0))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 0))]}
+[DEBUG] AINHOA SANTESTEBAN MARTINEZ ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] NAOMI ITZEL ROJO MORENO ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] NAIARA SARASUA RODRIGUEZ ÔåÆ Ventanas semanales: {0: [(datetime.time(0, 0), datetime.time(20, 0))], 1: [(datetime.time(0, 0), datetime.time(20, 0))], 2: [(datetime.time(0, 0), datetime.time(20, 0))], 3: [(datetime.time(0, 0), datetime.time(20, 0))], 4: [(datetime.time(0, 0), datetime.time(20, 0))], 5: [(datetime.time(0, 0), datetime.time(20, 0))], 6: [(datetime.time(0, 0), datetime.time(20, 0))]}
+[DEBUG] ENEKO SARASOLA USANDIZAGA ÔåÆ Dias libres: [0, 1, 2]
+[DEBUG] ENEKO SARASOLA USANDIZAGA ÔåÆ Ventanas semanales: {3: [(datetime.time(16, 0), datetime.time(23, 59))], 4: [(datetime.time(16, 0), datetime.time(23, 59))], 5: [(datetime.time(16, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(20, 0))]}
+[DEBUG] IBAI SARASOLA IPARRAGUIRRE ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] EDUARD VILLAMAYOR NOGUE ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] MARLON FABRICI RODRIGUEZ COOL ÔåÆ Dias libres: [2, 3]
+[DEBUG] MARLON FABRICI RODRIGUEZ COOL ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] ARSENIO SAMUEL WILSON RUIZ ÔåÆ Dias libres: [2]
+[DEBUG] ARSENIO SAMUEL WILSON RUIZ ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] MUHAMMAD WAQAS ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] NASSIKA ZAOUI BABAS ÔåÆ SIN restricciones (disponible siempre)
+[DEBUG] IKER DANIEL MELO RAMIREZ ÔåÆ Ventanas semanales: {1: [(datetime.time(0, 0), datetime.time(23, 0))], 2: [(datetime.time(0, 0), datetime.time(23, 0))], 3: [(datetime.time(0, 0), datetime.time(23, 0))], 4: [(datetime.time(0, 0), datetime.time(23, 0))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))], 0: [(datetime.time(0, 0), datetime.time(23, 0))]}
+[DEBUG] MARIA JOSE ZALACAIN ITURRIOZ ÔåÆ Dias libres: [0, 1]
+[DEBUG] MARIA JOSE ZALACAIN ITURRIOZ ÔåÆ Ventanas semanales: {2: [(datetime.time(0, 0), datetime.time(23, 59))], 3: [(datetime.time(0, 0), datetime.time(23, 59))], 4: [(datetime.time(0, 0), datetime.time(23, 59))], 5: [(datetime.time(0, 0), datetime.time(23, 59))], 6: [(datetime.time(0, 0), datetime.time(23, 59))]}
+[DEBUG] Test User test ÔåÆ SIN restricciones (disponible siempre)
+
+[DEBUG] Cobertura te├│rica por puesto (post-normalizaci├│n):
+  ADVERTENCIA APERTURA: 4 empleados / 7 demandas (ratio 0.57)
+  ADVERTENCIA APOYO ENLACE: 13 empleados / 56 demandas (ratio 0.23)
+  ADVERTENCIA BODEGA: 3 empleados / 7 demandas (ratio 0.43)
+  ADVERTENCIA CAMARERO BARRA: 11 empleados / 105 demandas (ratio 0.10)
+  ADVERTENCIA CAMARERO COMEDOR: 8 empleados / 77 demandas (ratio 0.10)
+  ADVERTENCIA ENLACE: 5 empleados / 14 demandas (ratio 0.36)
+  ADVERTENCIA JEFE BARRA: 4 empleados / 14 demandas (ratio 0.29)
+  ADVERTENCIA JEFE COMEDOR: 5 empleados / 14 demandas (ratio 0.36)
+  ADVERTENCIA PARRILLERO: 8 empleados / 27 demandas (ratio 0.30)
+[EVIDENCIA] Faltantes: 2025-01-06 JEFE BARRA 20:00-00:00 need=1 cubierto=0 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO BARRA 12:00-14:00 need=2 cubierto=1 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO BARRA 14:00-16:00 need=3 cubierto=2 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO BARRA 16:00-19:30 need=2 cubierto=0 faltan=2
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO BARRA 20:00-00:00 need=4 cubierto=0 faltan=4
+[EVIDENCIA] Faltantes: 2025-01-06 APOYO ENLACE 13:00-22:00 need=3 cubierto=0 faltan=3
+[EVIDENCIA] Faltantes: 2025-01-06 ENLACE 21:00-00:00 need=1 cubierto=0 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-06 PARRILLERO 20:00-00:00 need=2 cubierto=0 faltan=2
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO COMEDOR 14:00-16:00 need=3 cubierto=0 faltan=3
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO COMEDOR 16:00-20:00 need=2 cubierto=1 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-06 CAMARERO COMEDOR 20:00-00:00 need=3 cubierto=0 faltan=3
+[EVIDENCIA] Faltantes: 2025-01-07 CAMARERO BARRA 16:00-19:30 need=2 cubierto=0 faltan=2
+[EVIDENCIA] Faltantes: 2025-01-07 CAMARERO BARRA 20:00-00:00 need=4 cubierto=0 faltan=4
+[EVIDENCIA] Faltantes: 2025-01-07 JEFE BARRA 20:00-00:00 need=1 cubierto=0 faltan=1
+[EVIDENCIA] Faltantes: 2025-01-07 ENLACE 21:00-00:00 need=1 cubierto=0 faltan=1

@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.7 CORREGIDA   (13-sep-2025)
+AGENDA GENERATOR API – Gandarías v3.8 (ASCII-only console output)
 
-CORRECCIONES APLICADAS:
-• Fix mapeo de días PostgreSQL (0=Domingo) vs Python weekday (0=Lunes)
-• Debug mejorado para restricciones de empleados
-• Verificación de disponibilidad corregida
-• Logs adicionales para diagnóstico
-
-• Selección de plantilla:
-    1) Primero por rango de fechas (StartDate/EndDate) que se solape con la semana pedida
-    2) Si no existe, usar la única plantilla con IsActive = TRUE
-• Turnos obligatorios (UserShifts) → prioridad, sin BT/C.
-• VAC / ABS visibles en preview y guardados en BD (Workstation "AUSENCIA").
-• NUEVO: Solver flexible que permite cobertura parcial cuando no hay suficientes empleados.
-• ACTUALIZADO:
-    - Máximo de 2 BLOQUES por día (un bloque = tiempo continuo; tramos contiguos cuentan como 1)
-    - 9 h/día estrictas en modo estricto; flexibles (penalizadas) en modo flexible
-    - Cálculo de BT/C basado en cantidad de BLOQUES del día por empleado
+CAMBIOS CLAVE v3.8
+• Priorización: al menos 1 persona por puesto y día (penalización fuerte).
+• Normalización de demandas por día/puesto: perfil por franja usando MAX(need), no suma.
+• Segmentación automática para que cada demanda no exceda 9h.
+• Disponibilidad y roles reforzados (no se crean variables inviables).
+• Evidencia en logs: sin candidatos, sin cobertura, y puestos sin personal habilitado.
+• Salida consola ASCII (evita UnicodeEncodeError en Windows/PowerShell).
 """
 
 import logging
@@ -32,6 +23,21 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from ortools.sat.python import cp_model
 from psycopg2 import DataError, OperationalError, ProgrammingError
+
+# ───────── CONFIG GENERAL ─────────
+ASCII_LOGS = True                   # evita emojis en print/logs
+ENFORCE_PEAK_CAP = True             # normaliza solapes usando MAX(need) por franja
+PEAK_CAP_LOG = True                 # log de normalización
+MIN_HOURS_BETWEEN_SHIFTS = 9
+MIN_HOURS_BETWEEN_SPLIT = 4
+MAX_DAYS_PER_WEEK = 6
+MAX_HOURS_PER_DAY = 9
+MAX_SHIFT_DURATION_HOURS = 9        # límite por demanda
+
+# Pesos / penalizaciones
+WEIGHT_MUST_HAVE_ONE = 200_000      # penalización por puesto/día sin nadie asignado
+WEIGHT_ULTRA_SLOT0 = 500_000        # boost a la 1ª franja del puesto/día
+WEIGHT_SHORT_SLOT = 100_000         # boost a franjas muy cortas
 
 # ───────── FLASK APP ─────────
 app = Flask(__name__)
@@ -47,15 +53,6 @@ DB = {
     "sslmode":  "require",
 }
 
-# ───────── PARÁMETROS ─────────
-MIN_HOURS_BETWEEN_SHIFTS = 9
-MIN_HOURS_BETWEEN_SPLIT = 4
-MAX_SHIFTS_CONTINUOUS = 1   # (ya no se usa para límite/día; se deja por compatibilidad)
-MAX_SHIFTS_SPLIT = 2        # (ya no se usa para límite/día; se deja por compatibilidad)
-MAX_SHIFTS_HYBRID = 4       # (puede usarse en preferencias/diagnósticos)
-MAX_DAYS_PER_WEEK = 6
-MAX_HOURS_PER_DAY = 9
-
 def uid(): return str(uuid.uuid4())
 def now(): return datetime.now(timezone.utc)
 
@@ -65,109 +62,86 @@ class DataNotFoundError(Exception): ...
 class DataIntegrityError(Exception): ...
 class ScheduleGenerationError(Exception): ...
 
-# ───────── MODELOS CORREGIDOS ─────────
+# ───────── MODELOS ─────────
 class Emp:
     def __init__(self, row: Tuple):
         self.id, self.name, self.split = row
         self.roles = set()
-        self.day_off = set()
-        self.window = defaultdict(list)
-        self.exc = defaultdict(list)
-        self.absent = set()
-        self.abs_reason = {}      # fecha → 'VAC' / 'ABS'
+        self.day_off = set()             # PostgreSQL DOW (0=Dom, 1=Lun, ..., 6=Sab)
+        self.window = defaultdict(list)  # DOW → [(from,to)]
+        self.exc = defaultdict(list)     # date → [(from,to)]
+        self.absent = set()              # dates
+        self.abs_reason = {}             # date → VAC/ABS
 
-    def is_hybrid(self): return len(self.roles) >= 4
     def can(self, ws): return ws in self.roles
-    
-    def off(self, d): 
-        # FIX: Convertir Python weekday a PostgreSQL DOW
-        # Python: 0=Lunes, 1=Martes, 2=Miércoles, 3=Jueves, 4=Viernes, 5=Sábado, 6=Domingo
-        # PostgreSQL: 0=Domingo, 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado
-        pg_dow = (d.weekday() + 1) % 7
+
+    def off(self, d: date) -> bool:
+        # Python weekday: 0=Lun..6=Dom → PostgreSQL: 0=Dom..6=Sab
+        pg_dow = d.weekday()  # Sin conversión, mapeo directo
         return pg_dow in self.day_off
-    
-    def absent_day(self, d): return d in self.absent
 
-    def available(self, d, s, e):
+    def absent_day(self, d: date) -> bool:
+        return d in self.absent
+
+    def available(self, d: date, s: time, e: time) -> bool:
+        if not self.day_off and not self.window and not self.exc:
+            # sin restricciones → disponible siempre
+            return True
         if self.off(d) or self.absent_day(d):
-            if 'KARIN' in self.name or 'NAIARA' in self.name:
-                print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: OFF o AUSENTE")
             return False
-
-        pg_dow = (d.weekday() + 1) % 7
+        pg_dow = d.weekday()
+        # Excepción por fecha tiene prioridad; si no, ventana por DOW
         win = self.exc.get(d) or self.window.get(pg_dow)
-
         if not win:
-            if 'KARIN' in self.name or 'NAIARA' in self.name:
-                print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: SIN VENTANAS")
             return False
-
-        # Validar contra ventanas
+        # 00:00 se interpreta como fin de día (23:59) para validar contención
+        end = e if e != time(0, 0) else time(23, 59)
         for a, b in win:
-            # Si el turno cruza medianoche (ej: 21:00–00:00) → tratar 00:00 como 24:00
-            end = e
-            if end == time(0, 0):
-                end = time(23, 59)
-
             if s >= a and end <= b:
-                if 'KARIN' in self.name or 'NAIARA' in self.name:
-                    print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: dentro de ventana {a}-{b}")
                 return True
-
-        if 'KARIN' in self.name or 'NAIARA' in self.name:
-            print(f"[AVAILABLE] {self.name} - {d} {s}-{e}: FUERA de ventana {win}")
         return False
 
 
 class Demand:
     def __init__(self, row: Tuple):
-        (self.id, rdate, self.wsid, self.wsname,
-         self.start, self.end, need) = row
+        (self.id, rdate, self.wsid, self.wsname, self.start, self.end, need) = row
         self.date = rdate.date() if hasattr(rdate, 'date') else rdate
         self.need = int(need)
-        self.slot_index = 0
+        self.slot_index = 0  # orden dentro del día/puesto
+
 
 # ───────── HELPERS ─────────
 def _t2m(t: time) -> int:
-    return t.hour * 60 + t.minute
+    return (0 if t is None else t.hour * 60 + t.minute)
+
+def _m2t(m: int) -> time:
+    m = max(0, min(24*60, m))
+    return time(m // 60, m % 60) if m < 24*60 else time(0, 0)
 
 def duration_min(dm) -> int:
     start = _t2m(dm.start)
-    end = _t2m(dm.end)
-    if dm.end == time(0, 0):
-        end = 24*60
-    if end < start:              # cruza medianoche
+    end = _t2m(dm.end) if dm.end != time(0, 0) else 24*60
+    if end < start:  # cruza medianoche
         end += 24*60
     return end - start
 
-def demand_weight(dm):
-    dur = max(1, duration_min(dm))
+dur_min = duration_min  # alias
 
-    # 🚩 Paso 1: priorizar al menos un empleado por puesto/día
-    if dm.slot_index == 0:
-        return 500000
-
-    # 🚩 Paso 2: lógica general por duración
-    if dur <= 15:
-        return 100000
-
-    return max(1, 60000 // dur)
-
-
-
-# Alias por compatibilidad (si quedaba alguna referencia antigua)
-dur_min = duration_min
-
-def _m2t(m: int) -> time:
-    return time(m // 60, m % 60)
-
-MAX_SHIFT_DURATION_HOURS = 9
+def split_long_segment(d: date, wsid, wsname, s_min: int, e_min: int, need: int, max_hours: int):
+    """Divide [s_min, e_min) en subtramos de hasta max_hours horas."""
+    out = []
+    limit = max_hours * 60
+    cur = s_min
+    while cur < e_min:
+        nxt = min(cur + limit, e_min)
+        out.append(Demand((uid(), d, wsid, wsname, _m2t(cur), _m2t(nxt if nxt < 24*60 else 0), need)))
+        cur = nxt
+    return out
 
 def coalesce_demands(demands, tolerate_gap_min: int = 0):
     """
-    Une demandas contiguas del mismo día/puesto cuando
-    no hay hueco (o el hueco <= tolerate_gap_min) y el 'need' es igual,
-    sin exceder 9 horas continuas por tramo unido.
+    Une demandas contiguas del mismo día/puesto cuando no hay hueco (<= tolerate_gap_min)
+    y el 'need' es igual, sin exceder 9h.
     """
     by_key = defaultdict(list)
     for d in demands:
@@ -178,14 +152,13 @@ def coalesce_demands(demands, tolerate_gap_min: int = 0):
         items.sort(key=lambda x: (_t2m(x.start), _t2m(x.end)))
         if not items:
             continue
-
         curr = items[0]
         for nxt in items[1:]:
-            potential_duration_min = _t2m(nxt.end) - _t2m(curr.start)
-            potential_duration_hours = potential_duration_min / 60.0
+            pot_dur_min = _t2m(nxt.end if nxt.end != time(0,0) else time(23,59)) - _t2m(curr.start)
+            pot_dur_h = pot_dur_min / 60.0
             if (nxt.need == curr.need
                 and _t2m(nxt.start) - _t2m(curr.end) <= tolerate_gap_min
-                and potential_duration_hours <= MAX_SHIFT_DURATION_HOURS):
+                and pot_dur_h <= MAX_SHIFT_DURATION_HOURS):
                 curr.end = nxt.end
             else:
                 merged.append(curr)
@@ -194,42 +167,108 @@ def coalesce_demands(demands, tolerate_gap_min: int = 0):
 
     out = []
     for d in merged:
-        out.append(Demand((
-            d.id, d.date, d.wsid, d.wsname, d.start, d.end, d.need
-        )))
+        out.append(Demand((d.id, d.date, d.wsid, d.wsname, d.start, d.end, d.need)))
     return out
 
-# ───────── UTILIDADES BLOQUES ─────────
-def merge_intervals(intervals):
-    """ intervals: [(start_min, end_min), ...] -> fusiona por solape o contigüidad (end == next.start se considera continuo). """
-    if not intervals:
-        return []
-    intervals.sort()
-    merged = [intervals[0]]
-    for s, e in intervals[1:]:
-        ls, le = merged[-1]
-        if s <= le:  # solapa o toca
-            merged[-1] = (ls, max(le, e))
-        else:
-            merged.append((s, e))
-    return merged
-
-def to_min_t(t: time) -> int:
-    return t.hour * 60 + t.minute
-
-def count_blocks_for_employee_day(assigns_day_emp):
+def normalize_by_max_need_profile(demands):
     """
-    assigns_day_emp: lista de Demand para un empleado en un día (solo asignados)
-    Devuelve el número de bloques continuos, tratando intervalos contiguos como 1 solo bloque.
+    Para cada día/puesto:
+      1) Tomar todos los cortes de tiempo (start/end).
+      2) Para cada franja entre cortes consecutivos, calcular MAX(need) de demandas activas.
+      3) Crear segmentos con ese need (y fusionar contiguos con el mismo need).
+      4) Segmentar a lo sumo 9h por demanda.
+    Elimina sobre-esfuerzo por solapes duplicados (suma accidental).
     """
-    intervals = []
-    for dm in assigns_day_emp:
-        s = to_min_t(dm.start)
-        e = to_min_t(dm.end) if dm.end != time(0,0) else 24*60
-        if e < s:  # por seguridad
-            e += 24*60
-        intervals.append((s, e))
-    return len(merge_intervals(intervals))
+    if not ENFORCE_PEAK_CAP:
+        return demands
+
+    grouped = defaultdict(list)
+    for d in demands:
+        grouped[(d.date, d.wsid, d.wsname)].append(d)
+
+    out = []
+    for (dte, wsid, wsname), items in grouped.items():
+        # construir puntos de corte
+        cuts = set()
+        for it in items:
+            s = _t2m(it.start)
+            e = _t2m(it.end) if it.end != time(0, 0) else 24*60
+            cuts.add(s)
+            cuts.add(e)
+        cuts = sorted(cuts)
+        if len(cuts) <= 1:
+            continue
+
+        # evaluar franjas
+        segments = []
+        over_sum_detected = False
+        for i in range(len(cuts)-1):
+            a, b = cuts[i], cuts[i+1]
+            if a >= b:
+                continue
+            active = []
+            for it in items:
+                s = _t2m(it.start)
+                e = _t2m(it.end) if it.end != time(0, 0) else 24*60
+                # activo si cubre completamente la franja [a,b)
+                if s <= a and e >= b:
+                    active.append(it.need)
+            if not active:
+                continue
+            max_need = max(active)
+            sum_need = sum(active)
+            if sum_need > max_need:
+                over_sum_detected = True
+            segments.append((a, b, max_need))
+
+        # fusionar contiguos con mismo need
+        fused = []
+        for seg in segments:
+            if not fused:
+                fused.append(seg)
+            else:
+                la, lb, ln = fused[-1]
+                a, b, n = seg
+                if ln == n and a == lb:
+                    fused[-1] = (la, b, n)
+                else:
+                    fused.append(seg)
+
+        # cortar a <= 9h
+        for a, b, n in fused:
+            if n <= 0 or a >= b:
+                continue
+            if (b - a) <= MAX_SHIFT_DURATION_HOURS * 60:
+                out.append(Demand((uid(), dte, wsid, wsname, _m2t(a), _m2t(b if b < 24*60 else 0), n)))
+            else:
+                out.extend(split_long_segment(dte, wsid, wsname, a, b, n, MAX_SHIFT_DURATION_HOURS))
+
+        if over_sum_detected and PEAK_CAP_LOG:
+            print(f"[NORMALIZACION] {dte} {wsname}: solapes reducidos usando MAX(need).")
+
+    return out
+
+def set_slot_indexes(demands):
+    """Asigna slot_index por (día, puesto) en orden horario."""
+    by_day_ws = defaultdict(list)
+    for d in demands:
+        by_day_ws[(d.date, d.wsid)].append(d)
+    for (_, _), lst in by_day_ws.items():
+        lst.sort(key=lambda x: (_t2m(x.start), _t2m(x.end)))
+        for idx, d in enumerate(lst):
+            d.slot_index = idx
+
+def to_min(t): return t.hour*60 + t.minute
+def overlap(a, b): return not (a.end <= b.start or b.end <= a.start)
+
+# ───────── OBJETIVO: PESOS ─────────
+def demand_weight(dm: Demand) -> int:
+    dur = max(1, duration_min(dm))
+    if dm.slot_index == 0:
+        return WEIGHT_ULTRA_SLOT0
+    if dur <= 15:
+        return WEIGHT_SHORT_SLOT
+    return max(1, 60000 // dur)
 
 # ───────── BD ─────────
 def conn():
@@ -256,13 +295,9 @@ def monday(d: date) -> date:
     return d
 
 def pick_template(cur, week_start: date, week_end: date):
-    """
-    Selección de plantilla (ignorando el año en Start/End) priorizando cercanía y con demandas > 0.
-    """
-    print(f"\n{'='*60}")
-    print(f"[PICK_TEMPLATE] Buscando plantilla para semana {week_start} a {week_end}")
-    print(f"[PICK_TEMPLATE] Mes solicitado: {week_start.month} ({week_start.strftime('%B')})")
-    print(f"{'='*60}")
+    print("="*60)
+    print(f"[PICK_TEMPLATE] Semana {week_start} a {week_end}")
+    print("="*60)
 
     act = fetchall(cur, '''
         SELECT "Id","Name"
@@ -270,12 +305,12 @@ def pick_template(cur, week_start: date, week_end: date):
         WHERE "IsActive" = TRUE
     ''')
     if len(act) == 1:
-        print(f"✓ ENCONTRADA plantilla activa: '{act[0][1]}'")
+        print(f"[PICK_TEMPLATE] Plantilla activa: '{act[0][1]}'")
         return act[0]
     elif len(act) > 1:
-        raise DataIntegrityError(f"Hay {len(act)} plantillas activas; debe haber solo una")
+        raise DataIntegrityError("Hay varias plantillas activas; debe haber solo una")
     else:
-        print("  No hay plantillas activas, continuando por cercanía...")
+        print("[PICK_TEMPLATE] No hay plantilla activa; se elige por cercania...")
 
     rows = fetchall(cur, '''
         SELECT 
@@ -291,8 +326,7 @@ def pick_template(cur, week_start: date, week_end: date):
     if not rows:
         raise DataNotFoundError("No existen plantillas con StartDate/EndDate")
 
-    def md(d: date) -> tuple[int, int]:
-        return d.month, d.day
+    def md(x: date): return (x.month, x.day)
 
     def same_year(year: int, m: int, d: int) -> date:
         try:
@@ -302,29 +336,18 @@ def pick_template(cur, week_start: date, week_end: date):
 
     week_center = week_start + (week_end - week_start) // 2
 
-    def distance_metrics(start_md: tuple[int, int], end_md: tuple[int, int]) -> tuple[int, int]:
+    def distance_metrics(start_md, end_md):
         y = week_start.year
         s = same_year(y, start_md[0], start_md[1])
         e = same_year(y, end_md[0],   end_md[1])
-
-        segments = []
-        if s <= e:
-            segments.append((s, e))
-        else:
-            segments.append((s, date(y, 12, 31)))
-            segments.append((date(y, 1, 1), e))
-
-        def seg_dist(a: date, b: date):
+        segments = [(s, e)] if s <= e else [(s, date(y,12,31)), (date(y,1,1), e)]
+        def seg_dist(a, b):
             if not (b < week_start or a > week_end):
-                return 0, 0
+                return (0, 0)
             if b < week_start:
-                d1 = (week_start - b).days
-                d2 = abs((week_center - b).days)
+                return ((week_start - b).days, abs((week_center - b).days))
             else:
-                d1 = (a - week_end).days
-                d2 = abs((a - week_center).days)
-            return d1, d2
-
+                return ((a - week_end).days, abs((a - week_center).days))
         return min((seg_dist(a, b) for (a, b) in segments), key=lambda x: (x[0], x[1]))
 
     scored = []
@@ -335,28 +358,77 @@ def pick_template(cur, week_start: date, week_end: date):
             "created": created, "demandas": int(demandas or 0),
             "dist": dist, "dcenter": dcenter
         })
-
     scored.sort(key=lambda r: (r["dist"], r["dcenter"]))
 
-    print("\n[PICK_TEMPLATE] Ranking por cercanía (top 5):")
     for i, r in enumerate(scored[:5], 1):
-        print(f"  {i:>2}. {r['name']:<24}  dist={r['dist']:>2}  dcenter={r['dcenter']:>2}  demandas={r['demandas']}  ({r['start']}..{r['end']})")
+        print(f"  {i:>2}. {r['name']:<24} dist={r['dist']:>2} dcenter={r['dcenter']:>2} demandas={r['demandas']} ({r['start']}..{r['end']})")
 
     chosen = next((r for r in scored if r["demandas"] > 0), None)
     if chosen:
-        print(f"\n✓ ENCONTRADA por cercanía con demandas: '{chosen['name']}'")
-        print(f"  Rango: {chosen['start']} a {chosen['end']} | demandas={chosen['demandas']} | dist={chosen['dist']} dcenter={chosen['dcenter']}")
+        print(f"[PICK_TEMPLATE] Elegida: '{chosen['name']}' (con demandas>0)")
         return (chosen["id"], chosen["name"])
 
-    print("\n[PICK_TEMPLATE] ✗ Ninguna candidata cercana tiene demandas > 0")
-    raise DataNotFoundError("No se encontró ninguna plantilla con demandas > 0")
+    raise DataNotFoundError("No se encontró plantilla con demandas > 0")
 
-# ───────── CARGA DATOS CORREGIDA ─────────
+# ───────── CARGA DATOS ─────────
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
 
+    # Helper: convierte time/interval/None -> time|None
+    def _to_time(x):
+        if x is None:
+            return None
+        if isinstance(x, time):
+            return x
+        if isinstance(x, timedelta):
+            return (datetime.min + x).time()
+        # fallback prudente
+        try:
+            return (datetime.min + x).time()
+        except Exception:
+            return None
+
+    # Helper: arma pares válidos (s, e) con 00:00 tratado como fin de día
+    def _pair(s, e):
+        s, e = _to_time(s), _to_time(e)
+        if not s or not e:
+            return None
+        # normalizar "fin de día"
+        e = e if e != time(0, 0) else time(23, 59)
+        return (s, e) if s < e else None
+
+    # Helper: complemento de intervalos bloqueados dentro de la jornada [00:00, 23:59]
+    def _complement_blocks(blocks):
+        DAY_START, DAY_END = time(0, 0), time(23, 59)
+        # ordenar y fusionar
+        ivs = []
+        for p in blocks:
+            if p: ivs.append(p)
+        ivs.sort(key=lambda p: (p[0], p[1]))
+        merged = []
+        for s, e in ivs:
+            if not merged:
+                merged.append([s, e])
+            else:
+                ls, le = merged[-1]
+                if s <= le:
+                    merged[-1][1] = max(le, e)
+                else:
+                    merged.append([s, e])
+        # construir complementos
+        out = []
+        cur = DAY_START
+        for s, e in merged:
+            if cur < s:
+                out.append((cur, (s if s != time(0,0) else time(23,59))))
+            cur = max(cur, e)
+        if cur < DAY_END:
+            out.append((cur, DAY_END))
+        return out
+
     with conn() as c, c.cursor() as cur:
+        # ── plantilla y demandas
         tpl_id, tpl_name = pick_template(cur, week_start, week_end)
 
         demands = [Demand(r) for r in fetchall(cur, '''
@@ -370,20 +442,14 @@ def load_data(week_start: date):
             WHERE d."TemplateId" = %s
             ORDER BY d."Day", d."StartTime"
         ''', (week_start, tpl_id))]
+
         demands = coalesce_demands(demands, tolerate_gap_min=0)
-        # Enumerar demandas por puesto y día
-        by_day_ws = defaultdict(list)
-        for d in demands:
-            by_day_ws[(d.date, d.wsid)].append(d)
-
-        for (_, _), lst in by_day_ws.items():
-            lst.sort(key=lambda x: (x.start, x.end))
-            for idx, d in enumerate(lst):
-                d.slot_index = idx
-
+        demands = normalize_by_max_need_profile(demands)
+        set_slot_indexes(demands)
         if not demands:
             raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
 
+        # ── empleados y roles
         emps = {r[0]: Emp(r) for r in fetchall(cur, '''
             SELECT "Id",
                    COALESCE("FirstName",'')||' '||COALESCE("LastName",'') AS name,
@@ -404,65 +470,117 @@ def load_data(week_start: date):
         if not any(e.roles for e in emps.values()):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
-        # FIX: Cargar restricciones con mapeo correcto y debug mejorado
-        print(f"\n[DEBUG] Cargando restricciones para semana {week_start}")
-        day_names = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
-        
-        for uid, dow, rt, f, t in fetchall(cur, '''
+        # ── restricciones semanales
+        print("\n[DEBUG] Cargando restricciones")
+        day_names = ['Domingo','Lunes','Martes','Miercoles','Jueves','Viernes','Sabado']
+
+        for uid, dow, rt, f1, t1, b1s, b1e, b2s, b2e in fetchall(cur, '''
             SELECT "UserId","DayOfWeek","RestrictionType",
-                   "AvailableFrom","AvailableUntil"
+                   "AvailableFrom","AvailableUntil",
+                   "Block1Start","Block1End",
+                   "Block2Start","Block2End"
             FROM "Management"."EmployeeScheduleRestrictions"
         '''):
             if uid not in emps:
                 continue
-            
-            emp_name = emps[uid].name
-            
-            if rt == 0:
-                # No trabaja
-                emps[uid].day_off.add(dow)
-                print(f"[DEBUG] {emp_name} NO TRABAJA {day_names[dow]} (PostgreSQL DOW={dow})")
-            elif rt == 1:
-                # Sin restricción - puede trabajar todo el día
-                emps[uid].window[dow].append((time(0, 0), time(23, 59)))
-                print(f"[DEBUG] {emp_name} SIN RESTRICCIÓN {day_names[dow]} - disponible 24h (PostgreSQL DOW={dow})")
-            elif rt == 2:
-                # Restricción de horario específica
-                if f and t:
-                    # Ventana completa: desde f hasta t
-                    emps[uid].window[dow].append(((datetime.min + f).time(), (datetime.min + t).time()))
-                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} {f}-{t} (PostgreSQL DOW={dow})")
-                elif f and not t:
-                    # Solo AvailableFrom: desde esa hora hasta final del día
-                    emps[uid].window[dow].append(((datetime.min + f).time(), time(23, 59)))
-                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} {f}-23:59 (PostgreSQL DOW={dow})")
-                elif not f and t:
-                    # Solo AvailableUntil: desde inicio del día hasta esa hora
-                    emps[uid].window[dow].append((time(0, 0), (datetime.min + t).time()))
-                    print(f"[DEBUG] {emp_name} VENTANA {day_names[dow]} 00:00-{t} (PostgreSQL DOW={dow})")
-                else:
-                    print(f"[WARNING] {emp_name} RestrictionType=2 sin horarios válidos {day_names[dow]}")
-            elif rt == 3:
-                # Disponible hasta cierta hora
-                if t:
-                    emps[uid].window[dow].append((time(0, 0), (datetime.min + t).time()))
-                    print(f"[DEBUG] {emp_name} DISPONIBLE HASTA {day_names[dow]} 00:00-{t} (PostgreSQL DOW={dow})")
-                else:
-                    print(f"[WARNING] {emp_name} RestrictionType=3 sin AvailableUntil {day_names[dow]}")
-            elif rt == 4:
-                # Disponible entre bloques (interpretar como disponible en horario específico)
-                if f and t:
-                    emps[uid].window[dow].append(((datetime.min + f).time(), (datetime.min + t).time()))
-                    print(f"[DEBUG] {emp_name} DISPONIBLE ENTRE BLOQUES {day_names[dow]} {f}-{t} (PostgreSQL DOW={dow})")
-                else:
-                    print(f"[WARNING] {emp_name} RestrictionType=4 sin horarios completos {day_names[dow]}")
-            elif rt == 5:
-                # No disponible entre bloques (marcar como día libre o manejar según necesites)
-                emps[uid].day_off.add(dow)
-                print(f"[DEBUG] {emp_name} NO DISPONIBLE ENTRE BLOQUES {day_names[dow]} - marcado como libre (PostgreSQL DOW={dow})")
-            else:
-                print(f"[WARNING] {emp_name} RestrictionType={rt} desconocido {day_names[dow]}")
+            emp = emps[uid]
 
+            # 0: No trabaja el día
+            if rt == 0:
+                emp.day_off.add(dow)
+                print(f"[DEBUG] {emp.name} NO TRABAJA {day_names[dow]}")
+                continue
+
+            # 1: Disponible todo el día
+            if rt == 1:
+                emp.window[dow].append((time(0,0), time(23,59)))
+                continue
+
+            # 2: Disponible en una franja o "desde"/"hasta" (campos parciales)
+            if rt == 2:
+                s = _to_time(f1)   # AvailableFrom
+                e = _to_time(t1)   # AvailableUntil
+
+                # Si no hay nada, no añadimos ventana
+                if s is None and e is None:
+                    continue
+
+                # "Disponible desde": si no hay fin, usar fin de día
+                if s is not None and e is None:
+                    e = time(23, 59)
+
+                # "Disponible hasta": si no hay inicio, usar 00:00
+                if s is None and e is not None:
+                    s = time(0, 0)
+
+                # Normalizar 00:00 como fin de día cuando viene en 'hasta'
+                if e == time(0, 0):
+                    e = time(23, 59)
+
+                if s < e:
+                    emp.window[dow].append((s, e))
+                continue
+
+
+            # 3: Disponible hasta 'AvailableUntil' (p.ej. mañana)
+            if rt == 3:
+                t = _to_time(t1)
+                if t:
+                    emp.window[dow].append((time(0,0), t if t != time(0,0) else time(23,59)))
+                continue
+
+            # 4: Disponible entre bloques (uno o dos)
+            if rt == 4:
+                p1 = _pair(b1s, b1e)
+                p2 = _pair(b2s, b2e)
+                any_added = False
+                if p1:
+                    emp.window[dow].append(p1); any_added = True
+                if p2:
+                    emp.window[dow].append(p2); any_added = True
+                # fallback: si no vinieron bloques pero sí f1/t1, usar esa franja
+                if not any_added:
+                    p = _pair(f1, t1)
+                    if p:
+                        emp.window[dow].append(p)
+                continue
+
+            # 5: NO disponible en los bloques → disponible en el complemento del día
+            #    (se apoya en Block1/Block2; si no hay, usa AvailableFrom/Until como bloque)
+            if rt == 5:
+                blocked = []
+                p1 = _pair(b1s, b1e)
+                p2 = _pair(b2s, b2e)
+                if p1: blocked.append(p1)
+                if p2: blocked.append(p2)
+                # si no hubo bloques, interpretar f1..t1 como bloque a excluir
+                if not blocked:
+                    p = _pair(f1, t1)
+                    if p: blocked.append(p)
+                comp = _complement_blocks(blocked)
+                for w in comp:
+                    emp.window[dow].append(w)
+                continue
+
+            # otros tipos futuros: ignorar o loguear
+            print(f"[ADVERTENCIA] Tipo de restricción desconocido rt={rt} para {emp.name} {day_names[dow]}")
+
+        # ── resumen de restricciones
+        print("\n[DEBUG] Resumen restricciones por empleado:")
+        for emp in emps.values():
+            if not emp.day_off and not emp.window and not emp.exc and not emp.absent:
+                print(f"[DEBUG] {emp.name} → SIN restricciones (disponible siempre)")
+            else:
+                if emp.day_off:
+                    print(f"[DEBUG] {emp.name} → Dias libres: {sorted(emp.day_off)}")
+                if emp.window:
+                    print(f"[DEBUG] {emp.name} → Ventanas semanales: {dict(emp.window)}")
+                if emp.exc:
+                    print(f"[DEBUG] {emp.name} → Excepciones puntuales: {dict(emp.exc)}")
+                if emp.absent:
+                    print(f"[DEBUG] {emp.name} → Ausente en: {sorted(emp.absent)}")
+
+        # ── excepciones puntuales por fecha
         for uid, d, rt, f, t in fetchall(cur, '''
             SELECT "UserId","Date","RestrictionType",
                    "AvailableFrom","AvailableUntil"
@@ -471,13 +589,15 @@ def load_data(week_start: date):
         ''', (week_start, week_end)):
             if uid not in emps:
                 continue
+            emp = emps[uid]
             if rt == 0:
-                emps[uid].absent.add(d)
-                print(f"[DEBUG] {emps[uid].name} NO TRABAJA excepción {d}")
-            elif f and t:
-                emps[uid].exc[d].append(((datetime.min + f).time(),
-                                         (datetime.min + t).time()))
+                emp.absent.add(d)
+            else:
+                p = _pair(f, t)
+                if p:
+                    emp.exc[d].append(p)
 
+        # ── licencias y ausentismos
         for uid, sd, ed in fetchall(cur, '''
             SELECT "UserId","StartDate"::date,
                    COALESCE("EndDate"::date,%s)
@@ -487,10 +607,11 @@ def load_data(week_start: date):
         ''', (week_end, week_end, week_end, week_start)):
             if uid not in emps:
                 continue
+            emp = emps[uid]
             d = max(sd, week_start)
             while d <= ed:
-                emps[uid].absent.add(d)
-                emps[uid].abs_reason[d] = 'VAC'
+                emp.absent.add(d)
+                emp.abs_reason[d] = 'VAC'
                 d += timedelta(days=1)
 
         for uid, sd, ed in fetchall(cur, '''
@@ -502,87 +623,40 @@ def load_data(week_start: date):
         ''', (week_end, week_end, week_end, week_start)):
             if uid not in emps:
                 continue
+            emp = emps[uid]
             d = max(sd, week_start)
             while d <= ed:
-                emps[uid].absent.add(d)
-                emps[uid].abs_reason[d] = 'ABS'
+                emp.absent.add(d)
+                emp.abs_reason[d] = 'ABS'
                 d += timedelta(days=1)
 
-        # DEBUG: Verificar empleados específicos
-        print(f"\n[DEBUG] Verificando empleados críticos para semana {week_start}:")
-        for uid, emp in emps.items():
-            if any(name in emp.name.upper() for name in ['KARIN', 'NAIARA']):
-                print(f"\n[DEBUG] {emp.name}:")
-                print(f"  - Días libres PostgreSQL: {emp.day_off}")
-                print(f"  - Roles: {len(emp.roles)} puestos")
-                for d in week:
-                    pg_dow = (d.weekday() + 1) % 7
-                    is_off = emp.off(d)
-                    day_name = d.strftime('%A')
-                    print(f"    {d} ({day_name}) - PG_DOW={pg_dow} - Libre: {is_off}")
-
-        fixed = defaultdict(list)
-        for uid, day, blk1, blk2 in fetchall(cur, '''
-            SELECT "UserId","Day","Block1Start","Block2Start"
-            FROM "Management"."UserShifts"
-        '''):
-            if uid not in emps:
-                continue
-            shift_date = week_start + timedelta(days=day)
-            if not (week_start <= shift_date <= week_end):
-                continue
-            for blk in (blk1, blk2):
-                if blk is None:
-                    continue
-                blk_time = (datetime.min + blk).time()
-                for dm in demands:
-                    if (dm.date == shift_date and dm.start == blk_time and
-                        emps[uid].can(dm.wsid) and
-                        emps[uid].available(dm.date, dm.start, dm.end) and
-                            dm.need > 0):
-                        fixed[shift_date].append((emps[uid], dm))
-                        dm.need -= 1
-                        break
-        demands = [d for d in demands if d.need > 0]
-
-        # DEBUG: Análisis de cobertura
-        print(f"\n[DEBUG] Análisis de cobertura por puesto:")
-        by_workstation = defaultdict(lambda: {'demands': 0, 'employees': 0, 'names': []})
+        # ── diagnóstico de cobertura teórica por puesto
+        print("\n[DEBUG] Cobertura teórica por puesto (post-normalización):")
+        by_ws = defaultdict(lambda: {'demands': 0, 'employees': 0, 'names': []})
         for d in demands:
-            by_workstation[d.wsname]['demands'] += d.need
+            by_ws[d.wsname]['demands'] += d.need
         for emp in emps.values():
             for ws_id in emp.roles:
-                ws_name = next((d.wsname for d in demands if d.wsid == ws_id), None)
+                ws_name = next((x.wsname for x in demands if x.wsid == ws_id), None)
                 if ws_name:
-                    by_workstation[ws_name]['employees'] += 1
-                    by_workstation[ws_name]['names'].append(emp.name)
-        
-        for ws_name, data in sorted(by_workstation.items()):
+                    by_ws[ws_name]['employees'] += 1
+                    by_ws[ws_name]['names'].append(emp.name)
+        for ws_name, data in sorted(by_ws.items()):
             if data['demands'] > 0:
-                ratio = data['employees'] / data['demands'] if data['demands'] > 0 else 0
-                status = "✓" if data['employees'] >= data['demands'] else "⚠"
-                print(f"  {status} {ws_name}: {data['employees']} empleados / {data['demands']} demandas (ratio: {ratio:.2f})")
-            
+                ratio = data['employees'] / data['demands'] if data['demands'] else 0
+                status = "OK" if data['employees'] >= data['demands'] else "ADVERTENCIA"
+                print(f"  {status} {ws_name}: {data['employees']} empleados / {data['demands']} demandas (ratio {ratio:.2f})")
             if data['demands'] > 0 and data['employees'] == 0:
-                    print(f"[EVIDENCIA] {ws_name} sin empleados capacitados para cubrir "
-                        f"{data['demands']} demandas en semana {week_start}")
-        
-           
-        
+                print(f"[EVIDENCIA] {ws_name} sin empleados capacitados para cubrir {data['demands']} demandas en semana {week_start}")
 
-    return list(emps.values()), demands, tpl_name, week, fixed
+    # fixed shifts omitidos aquí
+    return list(emps.values()), demands, tpl_name, week, {}
 
-# ───────── SOLVER (sin cambios) ─────────
-def to_min(t): return t.hour*60+t.minute
-def overlap(a, b): return not (a.end <= b.start or b.end <= a.start)
-
+# ───────── RESTRICCIONES AUX ─────────
 def add_max2_blocks_per_day(mdl, emps, dem, X):
     """
-    Impone que cada empleado no pueda tener 3 bloques disjuntos en un mismo día:
-    Para cada triple (a,b,c) pairwise disjoint → X_e,a + X_e,b + X_e,c <= 2
-    Los tramos contiguos se consideran un solo bloque (no son disjoint).
+    Máximo 2 bloques disjuntos por día y empleado.
     """
-    # Demands por día
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
@@ -606,8 +680,8 @@ def add_max2_blocks_per_day(mdl, emps, dem, X):
                         if (e.id, a.id) in X and (e.id, b.id) in X and (e.id, c.id) in X:
                             mdl.Add(X[e.id, a.id] + X[e.id, b.id] + X[e.id, c.id] <= 2)
 
+# ───────── SOLVER ESTRICTO ─────────
 def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
-    """Solver original (estricto) - requiere 100% de cobertura, 9h/día duras, máx 2 bloques/día."""
     mdl = cp_model.CpModel()
     X = {}
     for d in dem:
@@ -617,15 +691,16 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
     if not X:
         raise ScheduleGenerationError("Sin variables: nadie puede cubrir demandas")
 
-    # cubrir demanda
+    # cubrir demanda exactamente
     for d in dem:
         mdl.Add(sum(X[e.id, d.id] for e in emps if (e.id, d.id) in X) == d.need)
 
-    # no solapamiento
+    # no solapamiento por empleado
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
     for lst in by_day.values():
+        lst = sorted(lst, key=lambda z: (_t2m(z.start), _t2m(z.end)))
         for i in range(len(lst)):
             for j in range(i+1, len(lst)):
                 if overlap(lst[i], lst[j]):
@@ -633,18 +708,18 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
                         if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
                             mdl.Add(X[e.id, lst[i].id] + X[e.id, lst[j].id] <= 1)
 
-    # 9h/día DURAS + sin límite de "cantidad de turnos", usamos BLOQUES
+    # 9h diarias duras
     for e in emps:
-        for d in week:
-            todays = [dm for dm in dem if dm.date == d and (e.id, dm.id) in X]
+        for dday in week:
+            todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
             if todays:
                 mdl.Add(sum(duration_min(dm) * X[e.id, dm.id] for dm in todays) <= MAX_HOURS_PER_DAY * 60)
 
-    # máx días/sem
+    # días por semana
     for e in emps:
         mdl.Add(sum(X[e.id, d.id] for d in dem if (e.id, d.id) in X) <= MAX_DAYS_PER_WEEK)
 
-    # descanso ≥9h entre días
+    # descanso entre días (>=9h)
     for e in emps:
         for a in dem:
             for b in dem:
@@ -652,20 +727,6 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
                     if (24*60 - to_min(a.end)) + to_min(b.start) < MIN_HOURS_BETWEEN_SHIFTS*60:
                         mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
 
-    # bloques partidos ≥4h (si no split no permite gaps cortos)
-    for e in emps:
-        if not e.split:
-            continue
-        for dday in by_day:
-            lst = [dm for dm in dem if dm.date == dday]
-            for i in range(len(lst)):
-                for j in range(i+1, len(lst)):
-                    a, b = lst[i], lst[j]
-                    if (e.id, a.id) in X and (e.id, b.id) in X and not overlap(a, b):
-                        if 0 < (to_min(b.start)-to_min(a.end))/60 < MIN_HOURS_BETWEEN_SPLIT:
-                            mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
-
-    # Máximo 2 bloques/día (DURO)
     add_max2_blocks_per_day(mdl, emps, dem, X)
 
     sol = cp_model.CpSolver()
@@ -680,48 +741,39 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date]):
                 out[d.date].append((e, d))
     return out
 
+# ───────── SOLVER FLEXIBLE ─────────
 def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
-    """
-    Solver flexible que permite cobertura parcial cuando no hay suficientes empleados.
-    9h/día se tratan como soft-constraint (overtime penalizado). Máx 2 bloques/día es DURO.
-    """
     mdl = cp_model.CpModel()
     X = {}
+    cand_count = defaultdict(int)
 
+    # variables viables
     for d in dem:
         for e in emps:
-            can_work = e.can(d.wsid)
-            is_available = e.available(d.date, d.start, d.end)
-            
-            if 'KARIN' in e.name:
-                print(f"[DEBUG] {e.name} - {d.date} {d.start}-{d.end}: can={can_work}, available={is_available}")
-            
-            if can_work and is_available:
+            if e.can(d.wsid) and e.available(d.date, d.start, d.end):
                 X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
-                # Refuerzo de disponibilidad como restricción dura
-                for (eid, did), var in list(X.items()):
-                    emp = next(e for e in emps if e.id == eid)
-                    dm = next(d for d in dem if d.id == did)
-                    if not emp.available(dm.date, dm.start, dm.end):
-                        mdl.Add(var == 0)
-
-                if 'KARIN' in e.name:
-                    print(f"[SOLVER] Variable CREADA para {e.name}: {d.date} {d.start}-{d.end} {d.wsname}")
+                cand_count[d.id] += 1
 
     if not X:
         raise ScheduleGenerationError("Sin variables: nadie puede cubrir demandas")
 
-    unmet_demand = {d.id: mdl.NewIntVar(0, d.need, f"unmet_{d.id}") for d in dem}
+    # evidencia: demandas sin candidatos
+    for d in dem:
+        if cand_count[d.id] == 0:
+            print(f"[EVIDENCIA] Sin candidatos: {d.wsname} {d.date} {d.start.strftime('%H:%M')}-{d.end.strftime('%H:%M')} (need={d.need})")
 
+    # demanda no cubierta
+    unmet_demand = {d.id: mdl.NewIntVar(0, d.need, f"unmet_{d.id}") for d in dem}
     for d in dem:
         covered = sum(X[e.id, d.id] for e in emps if (e.id, d.id) in X)
         mdl.Add(covered + unmet_demand[d.id] == d.need)
 
-    # No solapamiento
+    # no solapamiento por empleado
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
     for lst in by_day.values():
+        lst = sorted(lst, key=lambda z: (_t2m(z.start), _t2m(z.end)))
         for i in range(len(lst)):
             for j in range(i+1, len(lst)):
                 if overlap(lst[i], lst[j]):
@@ -729,7 +781,8 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
                         if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
                             mdl.Add(X[e.id, lst[i].id] + X[e.id, lst[j].id] <= 1)
 
-    # 9h/día FLEX: overtime penalizado en el objetivo
+    # 9h/día FLEX: overtime penalizado
+    overtimes = []
     for e in emps:
         for dday in week:
             todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
@@ -738,15 +791,13 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
                 ot = mdl.NewIntVar(0, 24*60, f"ot_{e.id}_{dday.isoformat()}")
                 mdl.Add(ot >= total_min_today - MAX_HOURS_PER_DAY * 60)
                 mdl.Add(ot >= 0)
-                if not hasattr(mdl, "_overtimes"):
-                    mdl._overtimes = []
-                mdl._overtimes.append(ot)
+                overtimes.append(ot)
 
-    # Máximo días/sem
+    # días por semana
     for e in emps:
         mdl.Add(sum(X[e.id, d.id] for d in dem if (e.id, d.id) in X) <= MAX_DAYS_PER_WEEK)
 
-    # Descanso ≥9h entre días
+    # descanso entre días (>=9h)
     for e in emps:
         for a in dem:
             for b in dem:
@@ -754,35 +805,39 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
                     if (24*60 - to_min(a.end)) + to_min(b.start) < MIN_HOURS_BETWEEN_SHIFTS*60:
                         mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
 
-    # Bloques partidos ≥4h
-    for e in emps:
-        if not e.split:
-            continue
-        for dday in by_day:
-            lst = [dm for dm in dem if dm.date == dday]
-            for i in range(len(lst)):
-                for j in range(i+1, len(lst)):
-                    a, b = lst[i], lst[j]
-                    if (e.id, a.id) in X and (e.id, b.id) in X and not overlap(a, b):
-                        if 0 < (to_min(b.start)-to_min(a.end))/60 < MIN_HOURS_BETWEEN_SPLIT:
-                            mdl.Add(X[e.id, a.id] + X[e.id, b.id] <= 1)
-
-    # Máximo 2 bloques/día (DURO en flexible también)
     add_max2_blocks_per_day(mdl, emps, dem, X)
 
-    # 🎯 OBJETIVO: Minimizar demanda no cubierta (ponderada y por minutos) + penalizar overtime
+    # Grupos día/puesto: penalizar si queda el grupo sin nadie asignado
+    groups = defaultdict(list)  # (date, wsid) -> [demand ids]
+    for d in dem:
+        groups[(d.date, d.wsid)].append(d)
+
+    group_has_cover = {}
+    group_penalties = []
+    for gk, dlist in groups.items():
+        gvar = mdl.NewBoolVar(f"grp_cover_{gk[0].isoformat()}_{gk[1]}")
+        group_has_cover[gk] = gvar
+        # si cualquier X en el grupo es 1 => gvar = 1
+        for d in dlist:
+            for e in emps:
+                if (e.id, d.id) in X:
+                    mdl.AddImplication(X[e.id, d.id], gvar)
+        # penalización por grupo sin cubrir
+        group_penalties.append(1 - gvar)
+
+    # OBJETIVO
     weights = {d.id: demand_weight(d) for d in dem}
     total_unmet_weighted = sum(weights[d.id] * unmet_demand[d.id] for d in dem)
     total_unmet_minutes  = sum(duration_min(d) * unmet_demand[d.id] for d in dem)
-    total_overtime       = sum(mdl._overtimes) if hasattr(mdl, "_overtimes") else 0
+    total_overtime       = sum(overtimes) if overtimes else 0
+    must_have_one_pen    = sum(group_penalties) * WEIGHT_MUST_HAVE_ONE
 
-    # Prioridades: 1) unmet ponderado  2) minutos unmet  3) overtime
-    mdl.Minimize(total_unmet_weighted * 1000 + total_unmet_minutes * 1 + total_overtime * 5)
+    # Prioridad: (1) grupos sin cubrir, (2) unmet ponderado, (3) minutos unmet, (4) overtime
+    mdl.Minimize(must_have_one_pen * 1000 + total_unmet_weighted * 100 + total_unmet_minutes * 1 + total_overtime * 5)
 
     sol = cp_model.CpSolver()
     sol.parameters.max_time_in_seconds = 120
     status = sol.Solve(mdl)
-
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise ScheduleGenerationError("Modelo sin solución factible")
 
@@ -801,86 +856,88 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date]):
         for e in emps:
             if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
                 out[d.date].append((e, d))
+
+    # evidencia puntual
     for stats in coverage_stats.values():
         d = stats['demand']
         if stats['unmet'] > 0:
-            print(f"[EVIDENCIA] {d.date} {d.start}-{d.end} {d.wsname} "
-                f"→ demanda={d.need}, cubierto={stats['covered']}, faltan={stats['unmet']}")
-                
+            print(f"[EVIDENCIA] Faltantes: {d.date} {d.wsname} {d.start.strftime('%H:%M')}-{d.end.strftime('%H:%M')} need={d.need} cubierto={stats['covered']} faltan={stats['unmet']}")
 
-    print(f"\n{'='*80}")
-    print(f"📊 REPORTE DE COBERTURA")
-    print(f"{'='*80}")
+    # reporte general
+    print("\n" + "="*80)
+    print("REPORTE DE COBERTURA")
+    print("="*80)
     total_demand = sum(d.need for d in dem)
     total_covered = sum(stats['covered'] for stats in coverage_stats.values())
     total_unmet = sum(stats['unmet'] for stats in coverage_stats.values())
     overall_coverage = round((total_covered / total_demand) * 100, 1) if total_demand > 0 else 100
-    print(f"📈 RESUMEN GENERAL:")
-    print(f"   Total demandado: {total_demand:,} turnos")
-    print(f"   Total cubierto:  {total_covered:,} turnos ({overall_coverage}%)")
-    print(f"   Sin cubrir:      {total_unmet:,} turnos")
-
-    critical_issues = [stats for stats in coverage_stats.values() if stats['coverage_pct'] < 50]
-    if critical_issues:
-        print(f"\n⚠️  TURNOS CON COBERTURA CRÍTICA (<50%):")
-        for stats in critical_issues:
-            d = stats['demand']
-            print(f"   📅 {d.date} {d.start}-{d.end} {d.wsname}: {stats['covered']}/{d.need} ({stats['coverage_pct']}%)")
+    print(f"  Total demandado: {total_demand} turnos")
+    print(f"  Total cubierto : {total_covered} turnos ({overall_coverage}%)")
+    print(f"  Sin cubrir     : {total_unmet} turnos")
 
     by_workstation = defaultdict(lambda: {'demand': 0, 'covered': 0})
     for stats in coverage_stats.values():
         d = stats['demand']
-        by_workstation[d.wsname]['demand'] += d.need
+        by_workstation[d.wsname]['demand']  += d.need
         by_workstation[d.wsname]['covered'] += stats['covered']
 
-    print(f"\n📋 COBERTURA POR PUESTO:")
+    print("\nCOBERTURA POR PUESTO:")
     for ws_name, data in sorted(by_workstation.items()):
         pct = round((data['covered'] / data['demand']) * 100, 1) if data['demand'] > 0 else 100
-        status_icon = "🟢" if pct >= 80 else "🟡" if pct >= 50 else "🔴"
-        print(f"   {status_icon} {ws_name}: {data['covered']}/{data['demand']} ({pct}%)")
-    print(f"{'='*80}\n")
+        icon = "OK" if pct >= 80 else "MEDIO" if pct >= 50 else "BAJO"
+        print(f"  {icon} {ws_name}: {data['covered']}/{data['demand']} ({pct}%)")
+    print("="*80 + "\n")
 
     return out, coverage_stats
 
 # ───────── OBSERVACIONES ─────────
+def merge_intervals(intervals):
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [intervals[0]]
+    for s, e in intervals[1:]:
+        ls, le = merged[-1]
+        if s <= le:
+            merged[-1] = (ls, max(le, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+def to_min_t(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+def count_blocks_for_employee_day(assigns_day_emp):
+    intervals = []
+    for dm in assigns_day_emp:
+        s = to_min_t(dm.start)
+        e = to_min_t(dm.end) if dm.end != time(0,0) else 24*60
+        if e < s:
+            e += 24*60
+        intervals.append((s, e))
+    return len(merge_intervals(intervals))
+
 def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
-    """
-    Observación basada en BLOQUES del día:
-      - "C" si el empleado ya está en 2+ bloques (no puede tomar más).
-      - "BT" si aún está en <2 bloques (puede tomar más).
-    AUSENCIAS siguen como "VAC" / "ABS" y no cuentan para bloques.
-    """
     if (emp.id, dm.id) in fixed_ids:
         return ""
-
-    # Demandas reales de ese día para este empleado (sin AUSENCIA)
     todays_emp_dms = [d for e, d in assigns_day if e.id == emp.id and d.wsid is not None]
     blocks = count_blocks_for_employee_day(todays_emp_dms)
+    return "C" if blocks >= 2 else "BT"
 
-    if blocks >= 2:
-        return "C"
-    else:
-        return "BT"
-
-# ───────── GENERATE CORREGIDO ─────────
+# ───────── GENERATE ─────────
 def generate(week_start: date):
     emps, demands, tpl, week, fixed = load_data(week_start)
     sched = solve(emps, demands, week)
     for d, lst in fixed.items():
         sched[d].extend(lst)
-
     fixed_ids = {(e.id, dm.id) for lst in fixed.values() for e, dm in lst}
 
     for emp in emps:
         for d in emp.absent:
             if week_start <= d <= week[-1]:
                 pseudo_dm = type("Pseudo", (), {
-                    "id":   uid(),
-                    "wsid": None,
-                    "wsname": "AUSENCIA",
-                    "start": time(0, 0),
-                    "end":   time(0, 0),
-                    "date":  d
+                    "id": uid(), "wsid": None, "wsname": "AUSENCIA",
+                    "start": time(0,0), "end": time(0,0), "date": d
                 })()
                 sched[d].append((emp, pseudo_dm))
 
@@ -925,19 +982,14 @@ def generate_flexible(week_start: date):
     sched, coverage_stats = solve_flexible(emps, demands, week)
     for d, lst in fixed.items():
         sched[d].extend(lst)
-
     fixed_ids = {(e.id, dm.id) for lst in fixed.values() for e, dm in lst}
 
     for emp in emps:
         for d in emp.absent:
             if week_start <= d <= week[-1]:
                 pseudo_dm = type("Pseudo", (), {
-                    "id": uid(),
-                    "wsid": None,
-                    "wsname": "AUSENCIA",
-                    "start": time(0, 0),
-                    "end": time(0, 0),
-                    "date": d
+                    "id": uid(), "wsid": None, "wsname": "AUSENCIA",
+                    "start": time(0,0), "end": time(0,0), "date": d
                 })()
                 sched[d].append((emp, pseudo_dm))
 
@@ -994,7 +1046,7 @@ def generate_flexible(week_start: date):
 @app.route('/api/health')
 def health():
     st = {"status": "checking", "timestamp": now().isoformat(),
-          "version": "3.7-CORREGIDA", "checks": {}}
+          "version": "3.8", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -1095,7 +1147,7 @@ def save():
     except Exception as e:
         return jsonify({"error": "Error al guardar", "detail": str(e)}), 500
 
-    message = "Horario guardado con cobertura flexible" if flexible else "Horario guardado"
+    message = "Horario guardado (flexible)" if flexible else "Horario guardado"
     return jsonify({"message": message, **res}), 201
 
 @app.route('/api/agenda/diagnostics')
@@ -1124,19 +1176,19 @@ def diagnostics():
 
         for emp in emps:
             for ws_id in emp.roles:
-                ws_name = next((d.wsname for d in demands if d.wsid == ws_id), None)
+                ws_name = next((x.wsname for x in demands if x.wsid == ws_id), None)
                 if ws_name:
                     workstation_analysis[ws_name]['available_employees'] += 1
                     workstation_analysis[ws_name]['employee_names'].append(emp.name)
 
         for ws_name, data in workstation_analysis.items():
-            max_coverage = data['available_employees'] * 12  # 6 días * 2 turnos (referencia)
-            data['max_theoretical_coverage'] = min(max_coverage, data['total_demand'])
+            max_cov = data['available_employees'] * 12  # 6 dias * 2 turnos aprox
+            data['max_theoretical_coverage'] = min(max_cov, data['total_demand'])
             coverage_pct = (data['max_theoretical_coverage'] / data['total_demand'] * 100) if data['total_demand'] > 0 else 100
             if coverage_pct < 50:
-                data['issues'].append(f"CRÍTICO: Solo {coverage_pct:.1f}% de cobertura posible")
+                data['issues'].append(f"Critico: {coverage_pct:.1f}% posible")
             elif coverage_pct < 80:
-                data['issues'].append(f"ADVERTENCIA: Solo {coverage_pct:.1f}% de cobertura posible")
+                data['issues'].append(f"Advertencia: {coverage_pct:.1f}% posible")
             if data['available_employees'] == 0:
                 data['issues'].append("Sin empleados capacitados")
             elif data['available_employees'] < 3:
@@ -1148,7 +1200,7 @@ def diagnostics():
             "analysis": dict(workstation_analysis),
             "recommendations": [
                 "Usar modo flexible si hay problemas de cobertura",
-                "Capacitar más empleados en puestos críticos",
+                "Capacitar mas empleados en puestos criticos",
                 "Revisar si las demandas son realistas"
             ]
         }), 200
@@ -1197,7 +1249,7 @@ def comparison():
                 "Usar modo flexible" if strict_error and not flexible_error
                 else "Ambos modos funcionan, usar estricto para cobertura completa"
                 if not strict_error and not flexible_error
-                else "Revisar configuración - ambos modos fallan"
+                else "Revisar configuracion - ambos modos fallan"
             )
         }), 200
 
@@ -1205,21 +1257,9 @@ def comparison():
         return jsonify({"error": str(e)}), 500
 
 # ───────── MAIN ─────────
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 if __name__ == "__main__":
-    print("🚀 API Gandarías v3.7 CORREGIDA ↗ http://localhost:5000")
-    print("🔧 CORRECCIONES APLICADAS:")
-    print("   • Fix mapeo días PostgreSQL (0=Domingo) vs Python (0=Lunes)")
-    print("   • Debug mejorado para restricciones de empleados")
-    print("   • Verificación de disponibilidad corregida")
-    print("   • Logs adicionales para diagnóstico")
-    print("📋 Funcionalidades:")
-    print("   • Solver flexible para cobertura parcial")
-    print("   • Máximo 2 bloques por día (continuidad cuenta como 1)")
-    print("   • 9h/día duras en estricto, flex en flexible (penalizadas)")
-    print("   • Endpoint /api/agenda/diagnostics")
-    print("   • Endpoint /api/agenda/comparison")
-    print("   • Parámetros flexible=true/false en preview y save")
+    print("API Gandarias v3.8 en http://localhost:5000")
+    print("Correcciones: normalizacion de demandas por MAX(need), prioridad 1 persona por puesto/dia, evidencias en logs (ASCII).")
     app.run(host="0.0.0.0", port=5000, debug=True)
