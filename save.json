@@ -1,0 +1,4294 @@
+{
+    "coverage_details": {
+        "0041056f-5340-49fa-a9d2-4ac9828fcdea": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "0093dd57-7323-4039-9004-f06bd50a9281": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "02d21773-8346-4783-94cd-8570b3b07351": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "22:00-23:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "03b77b14-145d-4ac7-8adf-a35be71b85c8": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "12:00-14:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "0601e03b-d0bf-43df-a2d9-334c4a4cfb94": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 2,
+            "time": "14:00-16:00",
+            "unmet": 2,
+            "workstation": "PARRILLERO"
+        },
+        "06b941ee-479d-4245-8cda-8c9d6c94cbfa": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "08b1f9cb-c0b9-4a36-9ae1-2a549af8421b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "20:00-21:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "0932a3ee-a2b8-4f2f-a38d-dd5ec96d6fb5": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "0b38d271-98fa-4130-902e-5a20ea2ad0d1": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "22:00-23:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "0c0522c2-41cc-434f-8891-efac8ab120f1": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "0db86cf9-083e-4bab-aed9-783df9186cd0": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "0de0e0b0-2325-4b03-aa33-91bbf0a3e750": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "11:00-20:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "0f8f723f-c0bf-481e-8f8e-5ea5bc5e096f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "09:00-12:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "0f909487-66f4-4eb9-8328-6c049cd49ee9": {
+            "coverage_pct": 100.0,
+            "covered": 4,
+            "date": "2025-01-12",
+            "demanded": 4,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "1001f71d-a969-4786-904a-53baba906125": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "110b261c-cbdf-4b66-93ce-39febbe14bbe": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "22:00-00:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "11799ff2-0862-4aec-a354-25c664dce1ce": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "11a5d547-e3b1-486d-a179-39fc1868b106": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "124b92ee-388b-4328-8d00-9b8d23fde011": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "1254b0a5-088e-46c3-ba35-40cae0364637": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "ENSALADAS"
+        },
+        "1417ebd2-ab81-4240-896f-824651364828": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "16:00-18:00",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "1422c2fb-1fc9-4915-ae1c-86bb44943d06": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "15044eb5-9535-4421-a5be-fa1124bec8cd": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "09:00-13:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "158a5b91-f6c4-43f4-84fd-bbc790e77186": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "11:00-14:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "15cb756b-beac-48ac-b8bb-b427b2ff27f0": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "20:00-00:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "16778805-6f9f-4e9f-ba19-853ea370ed61": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "1677c954-2488-4938-b0f2-d546a146c7be": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "12:00-14:00",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "176eeb9a-75dd-4e15-b57a-b4bc1e33dc9e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "18210b6c-58ce-4fbd-9dba-a07fc30f53f3": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "189bf5a9-82fe-46a3-a3a5-0eb5a5fff993": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "13:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "18cb2b55-4124-4ea2-805c-a2928b148960": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "18e48d75-1b99-41b4-a96a-8c3acb4858f2": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "22:00-23:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "19e80d60-33d7-45f2-a440-4fc80dccfc91": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "1b8e83d2-14f2-4912-b4a9-42c1ee7a0dbc": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "19:30-20:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "1e70308c-07fb-4c43-846d-8c172f29d20f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "1e83cab7-9720-4d81-ad47-4a88f612079e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "21:00-22:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "1e9c1b53-2fec-4815-80a0-8921209e1d22": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "16:00-19:30",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "1f479960-95fd-436e-91b0-a9884bf9995d": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "22:00-00:00",
+            "unmet": 2,
+            "workstation": "APOYO ENLACE"
+        },
+        "1fabf7e7-866b-46ca-a70e-6a816d5ea91f": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "22:00-23:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "1ffecb3a-ee9f-4544-a9ca-b837d49c5e5f": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 4,
+            "time": "20:00-00:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "22bce4b5-fe10-4313-9951-ec92b18e8c6b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "18:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "249606d2-e5f2-42fc-aee4-edd1d6df810e": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "24b6098a-8296-43b0-8217-a84272aa9319": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "24c408f7-837a-4828-ad88-80a95bf48baf": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "262e83c9-3231-4e6b-8983-22ddd6bbd33e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "14:00-21:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "26d3e096-ef38-43c2-8452-9fdec46a73fa": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "14:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "27a4a1b7-2c70-4a13-bc55-2978945f3969": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-18:45",
+            "unmet": 0,
+            "workstation": "ENSALADAS"
+        },
+        "288cc8a6-2081-4a5c-9f91-f9fd3d27331d": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "19:30-00:00",
+            "unmet": 0,
+            "workstation": "JEFE COCINA"
+        },
+        "2a784ce8-935c-42d8-bd45-00082049cc64": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "2b876081-432f-4199-9887-350f51cf7ec6": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "16:00-18:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "2c14ef0a-5e22-4e58-8121-3206dd79fc36": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "2c3345e1-4b9b-48e2-97b8-3266dc4538c2": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "2cc307cd-c36a-4411-b8b2-10e6efdcbbb9": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "20:00-21:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "2d78f7c4-5736-43b1-868a-f26e937fe1f5": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "2f67b075-af3a-4af4-84d4-c772e3b164eb": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "14:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "2fc356f8-d58d-4c82-b38d-013a9eefc0ba": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "32410465-c962-48c1-b3e7-0e4b93cef507": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "33cef2f4-873e-4a56-992c-3033e1387ee5": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "34b6e468-3817-42c5-9e8b-a39600924344": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 4,
+            "time": "20:00-00:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "35149c13-4c28-4891-aac6-d8f2dcde1647": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "3568fdaa-595d-4f0c-a36f-58f109599c6a": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "16:00-19:30",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "3762e8ca-05b4-4b30-baf8-03046c428ad4": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "39095562-4c5f-46b4-8ef3-e959989bf3b1": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "16:00-18:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "395254a6-8ecf-4de9-8eaf-5078d2aa13e5": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "20:00-00:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "3a97de90-ebb9-4827-84aa-94393ca08d41": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 0,
+            "workstation": "ENSALADAS"
+        },
+        "3b995d0f-9e67-486b-9daa-8fd780e0ead9": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 1,
+            "workstation": "BODEGA"
+        },
+        "3c705143-3ca4-4544-a232-b6616e503360": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "3e34c949-d4c5-4fb6-a1c0-3165781d3fd7": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "16:00-19:30",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "3ead7bfc-1687-47db-a55d-dc64d2f10c2f": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "3ffae29d-2acd-42f8-87a9-437521f36303": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "4001af35-e642-46c3-8fbf-8da6abb3aab8": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "13:00-21:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "40a3de1f-a89c-4055-9229-19c676e54478": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "22:00-00:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "41a0c40b-e4e7-4512-b111-89ef7d65c7a2": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 1,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "42a283c3-05ed-4d1d-a084-ad4c4e027db0": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "42b03b80-24f1-48e1-8404-a9a0bf115599": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 0,
+            "workstation": "COCINERO"
+        },
+        "437486e0-af63-4ced-836b-c8f6773d53b0": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "43d646c3-67b2-4cde-b124-730284fe9192": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "20:00-00:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "44d56dcb-7db1-49e7-86bc-372d8f06c665": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "09:00-13:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "4546f71a-e407-455c-aacf-d11f653c388f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "20:00-23:45",
+            "unmet": 0,
+            "workstation": "PINTXOS CALIENTES"
+        },
+        "45493c1d-5519-449a-94ab-075ff89e8ba5": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "20:00-21:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "45bc5801-3a6c-4ee8-a2bd-b4a086a04399": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "12:00-14:00",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "46c65a78-2e53-41ff-9e86-e9852cd0118e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "16:00-19:30",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "473bcda3-f6d2-47b3-a1cc-4f7d7686f36e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "47472044-cfda-4062-be91-cd1171be84a1": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "12:00-20:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "47c4d9bd-8526-468e-bb4d-3f265b1515ef": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "49d9670e-d1c6-4502-9f8c-f3f2c6c09ebc": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "4b1d46ce-af71-4813-b851-3e683b2a92a0": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "4c32bf3b-630a-480a-b12d-146e71d5209b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "4d0d947c-bce4-42fd-be28-222ee943280e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "20:00-00:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "4d12821a-f56d-46e0-ad75-86597ab3d742": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-11",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "4d705cef-bb15-4b51-b6df-728fbb710c0b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "12:00-14:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "4dacc1a3-dbbe-43b6-b76a-c58a583036c6": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "18:00-20:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "4dd11747-1bc0-42c2-854b-58dad9dc6ef2": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "4e189811-08e9-4d67-a414-7a84ed596f97": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "4e3d7d61-f5bf-4384-8d47-cbfb99c6213a": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "22:00-23:00",
+            "unmet": 2,
+            "workstation": "APOYO ENLACE"
+        },
+        "4ea51ca4-5f6f-42eb-851a-235a8e84c6ee": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "18:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "4f9cdbe9-18e9-4f3b-84ee-f4da13a4d5d3": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "506e238e-26ee-450e-aceb-12d8eaa657d2": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "20:00-21:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "508e6412-dfab-4c16-bf42-c8b571221041": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "5539081a-cf7c-469b-b1ba-df86ca70a74c": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "12:00-21:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "5571ff3b-efd2-4655-8f27-e7393a601787": {
+            "coverage_pct": 66.7,
+            "covered": 2,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "12:00-13:00",
+            "unmet": 1,
+            "workstation": "CAMARERO BARRA"
+        },
+        "55bde9b5-1469-4ea3-9cd7-65b88b2d6c9e": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "58019c73-a560-42db-9477-0b851c342552": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "21:00-23:30",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "590758db-33d6-4659-8bec-436a095678b3": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "595e3447-d95e-4066-b916-08c2bd894d7b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "5991601d-f48e-406e-860a-474aeaf73ddd": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "59d98102-9f2c-4031-a175-b59362130c38": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "5a014020-e102-44c6-add6-3175aa59de93": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "5ab0b052-7032-4995-b8bd-459ca3216a6e": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 0,
+            "workstation": "JEFE COCINA"
+        },
+        "5e1b1120-d6d2-4bdf-8586-8da16776bed6": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "09:00-13:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "5e8fb965-0eff-4374-883a-df0d6491394c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "16:00-18:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "5f14ba69-913d-4ef9-986d-b3ad1ada457a": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "14:00-21:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "5f69bbe1-9f5b-4ecd-a979-7b627210c1b6": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "12:00-14:00",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "5fc77312-f9ed-4736-83bf-2c7cb5d1e033": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "5fdb0e04-887a-400e-b195-05813eeb8dcb": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "19:30-20:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "5ff26eae-20ea-4f07-83c1-80fd9801fb73": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "60a65351-acbf-4561-8cb7-2692ad25abcd": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "6174a591-5f9e-43b2-a8c8-d0cd18e045c8": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "13:00-16:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "61ca4dff-3f2f-452e-9b92-e315b5a0b0a7": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "624dc317-51b2-49db-8e7f-76dfd4741e5d": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "16:00-20:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "6398d4ed-3e64-4746-afd5-b8a5d5421436": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "12:00-14:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "649c7632-17d6-4ddb-b05a-032e939fa102": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-21:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "65a8f1ae-9201-4f35-976d-a34bc4d57e1c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "18:00-20:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "65f30a9e-960a-486a-839e-8b5933a9a114": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "667e37f3-0144-4b58-80a3-a24777ecd3f0": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "14:00-21:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "66c8e5c0-968c-4083-9f76-4cae1b1871a4": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "11:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "6732ebca-82f7-4afa-a541-12ee62b82e04": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "18:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "674e8e59-6508-4c4d-93ad-bac54ce59a62": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-11",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "67f75244-a4bc-4ba6-8a77-b6b6aa27defa": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "14:00-16:00",
+            "unmet": 2,
+            "workstation": "PARRILLERO"
+        },
+        "6ce06ea4-237a-459c-9a31-e4e6e4edac00": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 4,
+            "time": "19:30-00:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "6df4b7a7-c44e-42b9-8199-1d7e07d60032": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "21:00-23:30",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "6f4ae3a1-c939-4db2-9ae7-7f595cebd45b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "10:30-12:00",
+            "unmet": 0,
+            "workstation": "JEFE COCINA"
+        },
+        "70ad628b-03b0-4cd3-b8c0-542f6be5387b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "721ce13e-d104-4ca7-9fff-2b01d8d38ba1": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "7412d511-fe5f-4bbc-8d0f-874d45b6e521": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 0,
+            "workstation": "COCINERO"
+        },
+        "7683bcd3-04bc-4c1b-b2c2-ae122679bf50": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "14:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "7796aa15-f496-4a74-957f-4e6f84c9017c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "16:00-19:30",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "7804cf0b-4a20-407c-8fe9-94908713f672": {
+            "coverage_pct": 100.0,
+            "covered": 4,
+            "date": "2025-01-09",
+            "demanded": 4,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "7879e4e7-9ffe-4eae-b4b6-4f4d70660ce5": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "13:00-14:00",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "78a065d7-ebcb-4cd0-8c5e-681505e47d9b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "79caf47c-1745-460b-86fc-b6ac0ca22369": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "09:00-10:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "7ae2d090-c6b4-4821-9317-89c0ea1b1f23": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "12:00-21:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "7c1e4345-7bc4-4649-be65-d5ce1d21cc47": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "20:00-22:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "7c4af162-9b71-4415-a71f-b60dc8201ca6": {
+            "coverage_pct": 100.0,
+            "covered": 4,
+            "date": "2025-01-09",
+            "demanded": 4,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "7e583727-9921-4092-b25f-74d2a96e7c23": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-19:30",
+            "unmet": 0,
+            "workstation": "JEFE COCINA"
+        },
+        "8001fe29-ca3b-417f-9599-fcd6cbeb2cb8": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "16:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "82c1e3f1-6e58-4fac-bef7-2d8636f1c890": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 4,
+            "time": "20:00-00:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "8498d962-7e95-4944-87a9-2f3317981f68": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "859fc51b-9526-4da5-8d92-1c9343788632": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "85fa18c5-6b19-4fa0-93c2-0a3eba70a0a5": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "16:00-18:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "86be9c16-0596-4b31-9f29-c4a83fab8008": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "88dae9d4-579b-47ec-971b-27362ff072e4": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-21:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "8b29a4be-ecdf-4303-ade3-a3c051a455bb": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "8bf39b9d-3514-4a55-9a56-17dd2a4fa6b3": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "8c33a22c-3b31-48a7-b4fa-4402581c9d02": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "8d47885b-8811-4928-b584-a5d005679141": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "20:00-00:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "8de5b78e-9615-40b4-a5bd-76277f7d099f": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "8eb393ec-aa14-4c27-b9d1-f380265e68ad": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 1,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "8f193481-221e-4a7e-953d-8e4461b4b3d2": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "903a9c3f-12df-48e2-aeef-6b248fe714b9": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "90a41959-97d0-4dda-86ba-eb301afef537": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "19:30-20:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "92e16694-4ca9-4eaa-a64a-4aa691ae08d6": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 1,
+            "workstation": "BODEGA"
+        },
+        "9489ea5e-8f22-4548-b347-85810c7dab97": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "14:00-21:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "96c1415d-8d01-4d09-bebe-b39b4689d125": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 4,
+            "time": "20:00-00:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "9816f257-8eef-401c-9b29-5f4d79a2b326": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "9b0b7620-5c3f-4db2-a3ae-ca1ab58c4538": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "9bf2e1fe-18f3-4cce-9f7f-135e3afec73d": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "20:00-22:00",
+            "unmet": 2,
+            "workstation": "APOYO ENLACE"
+        },
+        "9ed55a08-a607-4df0-b758-817b81cd889b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "a296aa15-ac76-4d78-b217-76f3fa5da98d": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "a2ebd982-1953-43ba-935e-695ba856d77b": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "19:30-20:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "a6844b57-4741-4f3c-8f60-8689847aa15e": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "a73317e6-c5f3-46c2-9df0-01adc118d640": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "a789525e-7940-43a4-9ac0-9e0967ca8000": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "a7a96af0-a99d-48bb-b35c-2378437710ad": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "a85f3181-d1a5-437a-8fd6-133fd9efb82f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "09:00-12:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "aae7264d-d71e-432e-b3cc-6f60857af5b3": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "16:00-18:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "ac44c2e8-0c6a-4de1-94b8-654968f7c22d": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "acc289fb-7207-476d-a7f1-aa3a627354c5": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "acc39b40-b41c-4255-982a-200c99e2e793": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "acc8eb57-8f84-47e3-980e-6beb1ce5c3e9": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "ad2ec1d4-8178-4703-a970-f13f38bcaba1": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "af75a7b9-7c36-4e6e-a85b-91748b077f7b": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "b004fdac-1f41-425b-be5a-c93fb8697489": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "22:00-23:30",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "b134358e-c67d-49a5-a860-ff7f02c1f30e": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "b1b90db1-0274-410e-9dbe-4c94bbdca804": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "20:00-23:30",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "b232f4bb-4451-4020-9bbe-a8fb33a41817": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "19:30-20:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "b37b96c7-c231-4085-b50b-e2003de30f25": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "13:00-16:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "b3c4d46e-936b-45a9-b0e3-755faa468875": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "b3e2f283-7528-4b66-91dc-b9b71ac96b42": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "b450cdea-8e13-4032-a4a7-3dc00ae3c0c4": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "b7132283-7a00-405c-8879-391dc204e314": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "13:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "b76d968d-75d2-422d-ae6c-8cac45ec2ccd": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "b7dcb911-fe8c-4eac-81b3-bf89edc6074e": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "b8227dfd-2ce8-4676-b7f9-4fee730b1d36": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "b9a17aa5-9975-4ac7-9c35-5dc11cf75010": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "ba169e41-35e1-4665-b7e9-648180633d21": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 3,
+            "time": "22:00-00:00",
+            "unmet": 2,
+            "workstation": "APOYO ENLACE"
+        },
+        "ba699fbd-ac18-4f11-9d5f-44a81c1c2ec7": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "10:00-12:00",
+            "unmet": 1,
+            "workstation": "BODEGA"
+        },
+        "badea820-8e62-4500-a80b-24b94ffc65d3": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "16:00-18:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "bb863f79-c81c-4bda-8f55-1c789af03d42": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "14:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "bc3d7454-a8ca-42f9-9ce8-bf416ad584bb": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "bcfc002a-b82f-4f56-ab9c-a0c520d0390c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "bda58798-1688-4ca3-b0e8-1dfa43aa6d80": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "be1d7874-5ed5-41da-a327-3ca81ab35b67": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "beb0aec8-5b9d-4d2e-a136-3c885ab2e581": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "13:00-16:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "befff14e-441b-4847-a7c7-d60f92f9652b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "bffbb9b4-a294-4bbb-b1ec-c95d29e5d2a4": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "18:00-20:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "bffd10a1-2f29-4e44-82f7-df717507925c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "c0c11e60-b351-4ef8-93f5-065f0b7bce21": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "20:00-23:30",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "c0fea2f7-10e3-4ff3-b2e4-1e2538d3ef08": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "13:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "c187e281-316f-47c1-9681-5d66ad04565d": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "c1f7c1e0-f7fa-4b17-adc9-1b41d35c99d5": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "c29b6cc4-2af1-40de-b883-2e91f12bfbf1": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "c44f05ba-6d48-4445-98a9-2bb698804111": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "11:00-12:00",
+            "unmet": 0,
+            "workstation": "CAMARERO BARRA"
+        },
+        "c4e9a404-4293-4e8a-bafb-75bf93294b48": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "c5c41efc-32e5-4588-ac15-82b384771814": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "c67278aa-8628-4e35-bf6c-b8af5bf456c0": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "12:30-13:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "c77fa3e2-1349-49d5-bd69-04dc3f950e46": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-08",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "c873341a-01a1-4ef7-8134-c63f9436b179": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "10:00-12:00",
+            "unmet": 1,
+            "workstation": "BODEGA"
+        },
+        "c87e07bb-a1ec-463d-b99e-f5eb019d1c9b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 4,
+            "time": "14:00-16:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "c9b6ac48-f93f-4609-913e-e59a99c9abbe": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "c9dbaef3-063d-46db-b68a-bb358d6f5c3c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "20:00-22:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "cc22a0f2-f35c-4864-916e-ec57cea81f04": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "21:00-22:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "cdc477fb-cc71-4a89-93cb-284586585608": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "13:00-21:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "ce5668fe-cf3a-4b18-87cb-e3147accbccd": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "20:00-22:00",
+            "unmet": 2,
+            "workstation": "PARRILLERO"
+        },
+        "ce80ee66-a877-4e0d-9684-28d5d02afe54": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "cf60a24b-7e97-4575-92de-0e35a239d573": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "d09db95b-6ea4-48bb-8d6d-8762765f14b9": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "16:00-19:30",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "d1a8aecf-5208-481c-bfc3-161883a12613": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-10",
+            "demanded": 2,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "d2a1b314-72ec-4510-9bd6-bc581a345a96": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 3,
+            "time": "14:00-16:00",
+            "unmet": 3,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "d30f1dd6-1e95-42de-9d2c-43ef2642a3c4": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "d327536e-d1f4-453a-9329-a4c0ece760ad": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-07",
+            "demanded": 2,
+            "time": "20:00-00:00",
+            "unmet": 2,
+            "workstation": "PARRILLERO"
+        },
+        "d34c57fe-c25f-4f71-9012-5884399b4a5f": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "d5d46702-813d-40c1-a579-fd04462fc4b1": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "d81a5469-6042-46f1-8b78-6138f5156ea2": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-06",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "d8c59531-2f8b-439f-aa1f-8297f701a51b": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "d9208a86-15d7-4ae1-9072-e83bb9229fc2": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "da045f2e-49f5-4202-8e5d-1b2adb3bd7d4": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "dcb9f87d-467b-45f9-9da8-0b371dc72f01": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "18:00-19:30",
+            "unmet": 2,
+            "workstation": "CAMARERO BARRA"
+        },
+        "deb4e356-bd0d-4bd3-a80c-aefb5f626cfc": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "10:30-11:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        },
+        "df5c1acc-efbe-4856-a704-8953805cc20c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "e0ceee1f-7183-4b78-ae60-16ae4c39abdd": {
+            "coverage_pct": 33.3,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 3,
+            "time": "22:00-00:00",
+            "unmet": 2,
+            "workstation": "APOYO ENLACE"
+        },
+        "e1717226-e20b-483c-a906-53156dd84135": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "e2d781d8-8893-4f3e-b513-792cee4ae351": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "e3bc3ecc-0791-468e-a7b2-80b9e7f67496": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 1,
+            "time": "21:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE COMEDOR"
+        },
+        "e423b41f-c502-4fd6-951d-a22430b7370b": {
+            "coverage_pct": 25.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 4,
+            "time": "22:00-23:00",
+            "unmet": 3,
+            "workstation": "CAMARERO BARRA"
+        },
+        "e44f8403-5147-4865-8fb5-5dd8168ed1a2": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "e88524d9-be59-49cf-8c51-33c763b482cb": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-10",
+            "demanded": 3,
+            "time": "13:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "e91d363a-dcaa-40cc-8726-6e81f3c82d1c": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "ea2149ab-9296-4ec9-8b69-8ddbfd1885b7": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "16:00-20:00",
+            "unmet": 2,
+            "workstation": "CAMARERO COMEDOR"
+        },
+        "eb807911-a8b1-4b69-bcad-a3412285b335": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "20:00-22:00",
+            "unmet": 3,
+            "workstation": "APOYO ENLACE"
+        },
+        "ec012efa-e584-4abc-ba7b-6af3f06cd95f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-12",
+            "demanded": 1,
+            "time": "12:00-14:00",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "ed0001ab-877f-48af-a85f-1bd1fa22e8bd": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE BARRA"
+        },
+        "edfcc934-da26-4852-940f-58680291f9cd": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 2,
+            "time": "20:00-23:30",
+            "unmet": 2,
+            "workstation": "PARRILLERO"
+        },
+        "ee3154c3-015f-4ec6-8578-6d489478fad1": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "23:30-00:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "efceeced-e188-4b40-bdaa-3ea15a3778c6": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-11",
+            "demanded": 2,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "eff443cb-6773-46c6-92df-3eab1530bedc": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 1,
+            "time": "20:00-00:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "f08f7280-edd8-4047-abb5-92e50d2383a2": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-08",
+            "demanded": 1,
+            "time": "16:00-20:00",
+            "unmet": 1,
+            "workstation": "JEFE BARRA"
+        },
+        "f0c30f28-8218-4433-ac02-f3705fb4708d": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-11",
+            "demanded": 4,
+            "time": "14:00-16:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "f192cf9a-5b2b-4d0e-abf8-69581f4ad3c3": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "ENLACE"
+        },
+        "f4a06d6f-12c4-4887-a46a-8ecb2620d9c6": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-09",
+            "demanded": 4,
+            "time": "20:00-22:00",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "f6dc9133-9582-4400-afeb-b38dd080b940": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-09",
+            "demanded": 3,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "f81564e6-07a8-4156-bc6f-3c1563015d23": {
+            "coverage_pct": 50.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "22:00-23:00",
+            "unmet": 1,
+            "workstation": "PARRILLERO"
+        },
+        "f926cf02-c580-46fb-8b9d-8f2969590ab6": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-07",
+            "demanded": 1,
+            "time": "09:00-10:00",
+            "unmet": 0,
+            "workstation": "BODEGA"
+        },
+        "f986c6e8-ef1f-4cb4-83e4-0ad405d8051b": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "13:00-16:00",
+            "unmet": 1,
+            "workstation": "ENLACE"
+        },
+        "fa1ca40e-b82a-4e5a-b0e2-a6181d447e6d": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "JEFE COCINA"
+        },
+        "fb22f832-4452-4ed0-8ab0-1ce6a30cba58": {
+            "coverage_pct": 100.0,
+            "covered": 3,
+            "date": "2025-01-12",
+            "demanded": 3,
+            "time": "13:00-14:00",
+            "unmet": 0,
+            "workstation": "APOYO ENLACE"
+        },
+        "fb6b050e-a2d9-42c1-8920-0019b0d72be6": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "12:00-13:00",
+            "unmet": 0,
+            "workstation": "COCINERO"
+        },
+        "fba6cf06-4dc0-4af8-b4c1-ceb01dcd42e2": {
+            "coverage_pct": 100.0,
+            "covered": 2,
+            "date": "2025-01-09",
+            "demanded": 2,
+            "time": "23:00-23:30",
+            "unmet": 0,
+            "workstation": "PARRILLERO"
+        },
+        "fbc5fcdd-0c76-4fc3-b7dc-b61e924b0079": {
+            "coverage_pct": 0.0,
+            "covered": 0,
+            "date": "2025-01-12",
+            "demanded": 4,
+            "time": "19:30-23:30",
+            "unmet": 4,
+            "workstation": "CAMARERO BARRA"
+        },
+        "fc45104b-308d-48c2-8e9f-3916db748f57": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-09",
+            "demanded": 1,
+            "time": "12:00-16:00",
+            "unmet": 0,
+            "workstation": "JEFE COMEDOR"
+        },
+        "fef56200-e61b-40e2-9d3f-cd3da3e46d5f": {
+            "coverage_pct": 100.0,
+            "covered": 1,
+            "date": "2025-01-06",
+            "demanded": 1,
+            "time": "10:45-12:00",
+            "unmet": 0,
+            "workstation": "APERTURA"
+        }
+    },
+    "message": "Horario guardado (flexible)",
+    "schedule": {
+        "2025-01-06": [
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "10:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "2246e6c4-e5df-461b-adc4-2aa7bfcad207",
+                "employee_name": "IULIANA SIMONA RANESCU",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "b6da0392-4aa8-4bb8-b1d4-d5b2bd9985f6",
+                "workstation_name": "JEFE COCINA"
+            },
+            {
+                "employee_id": "2246e6c4-e5df-461b-adc4-2aa7bfcad207",
+                "employee_name": "IULIANA SIMONA RANESCU",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "b6da0392-4aa8-4bb8-b1d4-d5b2bd9985f6",
+                "workstation_name": "JEFE COCINA"
+            },
+            {
+                "employee_id": "de2d73ee-1802-4681-ba00-44e4f9389c7c",
+                "employee_name": "BORJA VAQUERIZO ALASTUY",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "b6da0392-4aa8-4bb8-b1d4-d5b2bd9985f6",
+                "workstation_name": "JEFE COCINA"
+            },
+            {
+                "employee_id": "d08f0889-5284-4a28-ad99-babff24882a5",
+                "employee_name": "DIANA ANGELINA ACOSTA RAMOS",
+                "end_time": "19:30",
+                "observation": "BT",
+                "start_time": "16:00",
+                "workstation_id": "b6da0392-4aa8-4bb8-b1d4-d5b2bd9985f6",
+                "workstation_name": "JEFE COCINA"
+            },
+            {
+                "employee_id": "d08f0889-5284-4a28-ad99-babff24882a5",
+                "employee_name": "DIANA ANGELINA ACOSTA RAMOS",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "b6da0392-4aa8-4bb8-b1d4-d5b2bd9985f6",
+                "workstation_name": "JEFE COCINA"
+            },
+            {
+                "employee_id": "07b07e91-fdaa-48cb-8a06-bce92838c35b",
+                "employee_name": "OLGA PATRICIA NOREÑA VALENCIA",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "10:45",
+                "workstation_id": "01f1470b-c577-497a-9479-4198ff70e1ce",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "f8ea5fdf-5159-441b-8fdb-e03777872e95",
+                "employee_name": "DIANA JECKELINE ALBAN CAGUA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "0b4bfb9f-d5bd-4116-b078-618eb39e44fb",
+                "workstation_name": "ENSALADAS"
+            },
+            {
+                "employee_id": "b7ea6f91-7e55-4a9a-b5a3-44a2aa495b84",
+                "employee_name": "MIRNA VERONI UMANZOR SANDOVAL",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "0b4bfb9f-d5bd-4116-b078-618eb39e44fb",
+                "workstation_name": "ENSALADAS"
+            },
+            {
+                "employee_id": "b7ea6f91-7e55-4a9a-b5a3-44a2aa495b84",
+                "employee_name": "MIRNA VERONI UMANZOR SANDOVAL",
+                "end_time": "18:45",
+                "observation": "BT",
+                "start_time": "16:00",
+                "workstation_id": "0b4bfb9f-d5bd-4116-b078-618eb39e44fb",
+                "workstation_name": "ENSALADAS"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "a3dad23b-d7ac-43ab-96e0-403da689c238",
+                "employee_name": "RUTH DOBU",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "384140d9-46c8-48e1-bc72-9d702c3f0572",
+                "workstation_name": "COCINERO"
+            },
+            {
+                "employee_id": "a3dad23b-d7ac-43ab-96e0-403da689c238",
+                "employee_name": "RUTH DOBU",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "384140d9-46c8-48e1-bc72-9d702c3f0572",
+                "workstation_name": "COCINERO"
+            },
+            {
+                "employee_id": "ce8cc39d-8ef4-47b0-98d3-a7dbc3f9fec9",
+                "employee_name": "SUBINA KHAREL SUBINA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "384140d9-46c8-48e1-bc72-9d702c3f0572",
+                "workstation_name": "COCINERO"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "c47607eb-f74d-4495-9049-7fd8592eeede",
+                "employee_name": "ROSA NEFES BURBANO ZUÑIGA",
+                "end_time": "23:45",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "882eb759-b3f5-4724-9476-6d1ade9589ce",
+                "workstation_name": "PINTXOS CALIENTES"
+            }
+        ],
+        "2025-01-07": [
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "10:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ],
+        "2025-01-08": [
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "21:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "21:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "43eff60a-8235-4ce7-a30b-07cc2dc1693b",
+                "employee_name": "FALILOU ADFASDFASDF",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "22:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ],
+        "2025-01-09": [
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "21:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b7b355c3-5820-466e-af79-689474d0fc8a",
+                "employee_name": "ANGEL HEYDER DAZA RENDON",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "16:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "43eff60a-8235-4ce7-a30b-07cc2dc1693b",
+                "employee_name": "FALILOU ADFASDFASDF",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "43eff60a-8235-4ce7-a30b-07cc2dc1693b",
+                "employee_name": "FALILOU ADFASDFASDF",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "c4142bae-2e1d-4787-a315-b56e712c6674",
+                "employee_name": "DANIEL ESTEBAN VASQUEZ SERNA",
+                "end_time": "23:00",
+                "observation": "BT",
+                "start_time": "22:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "23:30",
+                "observation": "BT",
+                "start_time": "23:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "62bb4f0e-a08a-4ada-bd69-b9d86f672ebd",
+                "employee_name": "MARIA JOSE ZALACAIN ITURRIOZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ],
+        "2025-01-10": [
+            {
+                "employee_id": "4f273de7-7bb0-4f6f-845b-75e20de0efb6",
+                "employee_name": "MUHAMMAD WAQAS",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "19:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "21:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "21:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "20:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "43eff60a-8235-4ce7-a30b-07cc2dc1693b",
+                "employee_name": "FALILOU ADFASDFASDF",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "009c548c-193b-4481-bb34-e6c4399bfcdc",
+                "employee_name": "KARIN NOHEMY RODRIGUEZ RODAS",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ],
+        "2025-01-11": [
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "99fc5460-5e2f-46bc-9b30-1de3b467cfae",
+                "employee_name": "IDOIA LERTXUNDI ETXEBERRIA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "d4263691-fd86-4106-ae36-bdfecf4f4e69",
+                "employee_name": "IBAI SARASOLA IPARRAGUIRRE",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "05e7f592-9604-4c70-b832-499340d2fb32",
+                "employee_name": "JEFFERSON STALIN MACIAS BUENO",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "cfb790cc-fd37-4c51-a81b-65caa1859020",
+                "employee_name": "JAVIER SAN PEDRO MUÑOZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "e51f67c5-001a-42d0-938d-f39196556df8",
+                "employee_name": "ALVARO AHECHU GONZALEZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b4849caf-ae46-4261-a3d5-15bbe53c0cd0",
+                "employee_name": "JULEN UNAI PINGARRON ZAMBRANO",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "e51f67c5-001a-42d0-938d-f39196556df8",
+                "employee_name": "ALVARO AHECHU GONZALEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "f3587b2b-3e2c-4a59-b2c0-50225e2a5f80",
+                "employee_name": "GAURE MENDOZA DIAZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b4849caf-ae46-4261-a3d5-15bbe53c0cd0",
+                "employee_name": "JULEN UNAI PINGARRON ZAMBRANO",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "43eff60a-8235-4ce7-a30b-07cc2dc1693b",
+                "employee_name": "FALILOU ADFASDFASDF",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "20:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "009c548c-193b-4481-bb34-e6c4399bfcdc",
+                "employee_name": "KARIN NOHEMY RODRIGUEZ RODAS",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "3abbeaa6-d6a4-43c3-bb1c-0b57ae6b1bf2",
+                "employee_name": "EVA ELIZABETH FOZZATTI MENDEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "009c548c-193b-4481-bb34-e6c4399bfcdc",
+                "employee_name": "KARIN NOHEMY RODRIGUEZ RODAS",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ],
+        "2025-01-12": [
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "09:00",
+                "workstation_id": "bc666a0d-186b-4664-ab99-eb9f32dfedc5",
+                "workstation_name": "BODEGA"
+            },
+            {
+                "employee_id": "33374754-520b-41b4-8b57-ba007a091706",
+                "employee_name": "ALENNY CHANEL ROSARIO MEDINA",
+                "end_time": "11:00",
+                "observation": "BT",
+                "start_time": "10:30",
+                "workstation_id": "18a09199-1887-4100-8f7f-033afad49d6d",
+                "workstation_name": "APERTURA"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "35f96abe-a13d-4e95-9b36-c043b1ccbe61",
+                "employee_name": "NAIARA SARASUA RODRIGUEZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "c4fcf133-e25f-4e19-80cb-b388c73f4555",
+                "workstation_name": "JEFE BARRA"
+            },
+            {
+                "employee_id": "e15fef2e-0564-45aa-b784-b47f47290620",
+                "employee_name": "OLMAN MANUEL AVILA SOLORZANO",
+                "end_time": "12:00",
+                "observation": "BT",
+                "start_time": "11:00",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "ba53e5c3-a59e-4e02-8dec-7c22e8993192",
+                "employee_name": "JEAN PIERRE CHICO PALOMINO",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "26941b38-326a-4949-a5c9-fe2a836a2837",
+                "employee_name": "JOSE DANIEL NAVAS LOPEZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "be56e395-18c2-49e9-aa30-43d564d1623f",
+                "employee_name": "MELVIN ARIEL PEÑALO DE LA PAZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "a66de94d-12d6-41d6-995f-680adb2f258b",
+                "employee_name": "NAOMI ITZEL ROJO MORENO",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6340cf89-ae26-4bcd-ba6f-7a2383a66875",
+                "workstation_name": "CAMARERO BARRA"
+            },
+            {
+                "employee_id": "444653bb-a11c-4e84-bc65-46dfa339769a",
+                "employee_name": "LAYDA ISABEL IDROVO PARRA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "32944c91-5905-4a99-8c7b-484d84217f7f",
+                "workstation_name": "JEFE COMEDOR"
+            },
+            {
+                "employee_id": "e51f67c5-001a-42d0-938d-f39196556df8",
+                "employee_name": "ALVARO AHECHU GONZALEZ",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b4849caf-ae46-4261-a3d5-15bbe53c0cd0",
+                "employee_name": "JULEN UNAI PINGARRON ZAMBRANO",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "50efcc09-71be-4f69-88e7-5633e66dacfe",
+                "employee_name": "CRISTIAN ZAPATA MORA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "516f3736-2b9a-4b7e-a960-d06682a07c8e",
+                "employee_name": "MARLON FABRICI RODRIGUEZ COOL",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "e51f67c5-001a-42d0-938d-f39196556df8",
+                "employee_name": "ALVARO AHECHU GONZALEZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "1352e607-eaeb-4c14-849f-7b376996e48d",
+                "employee_name": "KARLA TATIANA CAEDENAS CAGUA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "b4849caf-ae46-4261-a3d5-15bbe53c0cd0",
+                "employee_name": "JULEN UNAI PINGARRON ZAMBRANO",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "d5ef224c-056f-486e-bda1-e9eae70b0aae",
+                "workstation_name": "APOYO ENLACE"
+            },
+            {
+                "employee_id": "2e1c161c-c3ef-4e9a-80d0-b2a286120178",
+                "employee_name": "FELIX MACARENO LARRAÑAGA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "f6c240ea-efdb-421a-b07d-7309c6c4125c",
+                "employee_name": "ARSENIO SAMUEL WILSON RUIZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "86c7725c-d178-4ad7-baba-d24943fd7e25",
+                "workstation_name": "PARRILLERO"
+            },
+            {
+                "employee_id": "aa8c32e8-6189-41b6-b933-363629670c98",
+                "employee_name": "ENEKO SARASOLA USANDIZAGA",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "12:00",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "7d8326e0-12a9-4329-87d8-e4c6e856ac46",
+                "employee_name": "ARTEM DEHTIAR",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "6a19bfd7-2a96-4a47-a726-8ae6459fec02",
+                "workstation_name": "ENLACE"
+            },
+            {
+                "employee_id": "009c548c-193b-4481-bb34-e6c4399bfcdc",
+                "employee_name": "KARIN NOHEMY RODRIGUEZ RODAS",
+                "end_time": "13:00",
+                "observation": "BT",
+                "start_time": "12:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "009c548c-193b-4481-bb34-e6c4399bfcdc",
+                "employee_name": "KARIN NOHEMY RODRIGUEZ RODAS",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "14:00",
+                "observation": "BT",
+                "start_time": "13:00",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "24a07adb-66e8-4839-b84d-a2a2c40b1865",
+                "employee_name": "JULIETH FERNA NOREÑA VALENCIA",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "1ce39bf1-f2cb-4311-ad72-317f728a10c6",
+                "employee_name": "JEAN POOL RUIZ SANCHEZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            },
+            {
+                "employee_id": "f74e2632-1654-4419-a5d1-4e6f5bc75fc1",
+                "employee_name": "MARIA MAGDALENA POLANCO GEREZ",
+                "end_time": "00:00",
+                "observation": "BT",
+                "start_time": "23:30",
+                "workstation_id": "db28d092-6ab7-4dd0-a55c-670ce2e5af98",
+                "workstation_name": "CAMARERO COMEDOR"
+            }
+        ]
+    },
+    "summary": {
+        "coverage": 42.0,
+        "flexible_mode": true,
+        "total_covered": 199,
+        "total_demands": 474,
+        "total_employees": 58,
+        "total_unmet": 275,
+        "usershift_free_overrides": [
+            {
+                "date": "2025-01-06",
+                "employee_id": "2d8b867c-8f28-47fe-b5f4-ad082d465755",
+                "employee_name": "Test User test"
+            },
+            {
+                "date": "2025-01-07",
+                "employee_id": "07b07e91-fdaa-48cb-8a06-bce92838c35b",
+                "employee_name": "OLGA PATRICIA NOREÑA VALENCIA"
+            },
+            {
+                "date": "2025-01-07",
+                "employee_id": "2d8b867c-8f28-47fe-b5f4-ad082d465755",
+                "employee_name": "Test User test"
+            },
+            {
+                "date": "2025-01-08",
+                "employee_id": "2d8b867c-8f28-47fe-b5f4-ad082d465755",
+                "employee_name": "Test User test"
+            },
+            {
+                "date": "2025-01-09",
+                "employee_id": "2d8b867c-8f28-47fe-b5f4-ad082d465755",
+                "employee_name": "Test User test"
+            },
+            {
+                "date": "2025-01-12",
+                "employee_id": "2d8b867c-8f28-47fe-b5f4-ad082d465755",
+                "employee_name": "Test User test"
+            }
+        ]
+    },
+    "template": "PRIMERA DE SEPTIEMBRE",
+    "week_end": "2025-01-12",
+    "week_start": "2025-01-06"
+}
