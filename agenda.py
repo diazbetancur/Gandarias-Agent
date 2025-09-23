@@ -103,6 +103,26 @@ class Demand:
         self.shift_type = None
 
 # ───────── HELPERS ─────────
+def build_latest_end_map_from_demands(demands):
+    """
+    Devuelve: { date_iso -> { wsid_str -> end_min } }, donde end_min está en minutos.
+    Si una demanda termina a 00:00, se interpreta como 23:59 (1439).
+    """
+    from collections import defaultdict
+    latest = defaultdict(dict)
+    for dm in demands:
+        if dm.wsid is None:
+            continue
+        end_t = dm.end if dm.end != time(0,0) else time(23,59)
+        end_m = _t2m(end_t)
+        prev = latest[dm.date].get(dm.wsid, -1)
+        if end_m > prev:
+            latest[dm.date][dm.wsid] = end_m
+    # convertir claves a strings (ISO/str) para serializar
+    latest_iso = {d.isoformat(): {str(w): m for w, m in m2.items()} for d, m2 in latest.items()}
+    return latest_iso
+
+
 def _t2m(t: time) -> int:
     if t is None: return 0
     return 24*60 if t == time(0,0) else (t.hour*60 + t.minute)
@@ -1591,7 +1611,7 @@ def generate(week_start: date):
 
     relaxed_list = [{"date": gdate.isoformat(), "workstation_id": str(wsid)}
                     for (gdate, wsid) in sorted(relaxed_groups, key=lambda x: (x[0], str(x[1])))]
-
+    latest_end_map = build_latest_end_map_from_demands(demands)
     res = {
         "template": tpl,
         "week_start": week_start.isoformat(),
@@ -1607,11 +1627,19 @@ def generate(week_start: date):
             "usershift_assignment_report": usershift_assignment_report,
             "usershift_windows_report": usershift_windows_report
         },
+        "latest_end_by_wsid": latest_end_map,
         "schedule": {}
     }
+    
+
     for d in week:
         k = d.isoformat(); res["schedule"][k] = []
         for emp, dm in sorted(sched.get(d, []), key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
+            day_key = d.isoformat()
+            latest_for_day = latest_end_map.get(day_key, {})
+            latest_end_min = latest_for_day.get(str(dm.wsid)) if dm.wsid is not None else None
+            cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
+
             res["schedule"][k].append({
                 "employee_id": str(emp.id),
                 "employee_name": emp.name,
@@ -1620,8 +1648,8 @@ def generate(week_start: date):
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
                 "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                                else "ABS" if dm.wsid is None
-                                else calc_obs(emp, dm, sched[d], fixed_ids))
+                    else "ABS" if dm.wsid is None
+                    else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT"))
             })
     return res, sched, emps, week, fixed_ids
 
@@ -1655,11 +1683,12 @@ def generate_flexible(week_start: date):
     overrides_list = [{"employee_id": str(eid),
                        "employee_name": next((e.name for e in emps if e.id == eid), ""),
                        "date": d.isoformat()} for (eid, d), v in usershift_plan.items() if v["mode"] == "free_mode"]
-
+    latest_end_map = build_latest_end_map_from_demands(demands)
     res = {
         "template": tpl,
         "week_start": week_start.isoformat(),
         "week_end": (week_start + timedelta(days=6)).isoformat(),
+        "latest_end_by_wsid": latest_end_map,
         "summary": {
             "total_employees": len(emps),
             "total_demands": total_req,
@@ -1688,6 +1717,11 @@ def generate_flexible(week_start: date):
     for d in week:
         k = d.isoformat(); res["schedule"][k] = []
         for emp, dm in sorted(sched.get(d, []), key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
+            day_key = d.isoformat()
+            latest_for_day = latest_end_map.get(day_key, {})
+            latest_end_min = latest_for_day.get(str(dm.wsid)) if dm.wsid is not None else None
+            cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
+
             res["schedule"][k].append({
                 "employee_id": str(emp.id),
                 "employee_name": emp.name,
@@ -1696,8 +1730,8 @@ def generate_flexible(week_start: date):
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
                 "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                                else "ABS" if dm.wsid is None
-                                else "BT")
+                    else "ABS" if dm.wsid is None
+                    else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT"))
             })
     return res, sched, emps, week, set()
 
@@ -1797,11 +1831,10 @@ def save():
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
-                latest_end_by_wsid = {}
-                for _, dm in ass:
-                    if dm.wsid is None: continue
-                    end_t = dm.end if dm.end != time(0,0) else time(23,59)
-                    latest_end_by_wsid[dm.wsid] = max(latest_end_by_wsid.get(dm.wsid, time(0,0)), end_t)
+                latest_map_all = res.get("latest_end_by_wsid", {})
+                day_key = d.isoformat()
+                # { wsid_str -> end_min }
+                latest_end_by_wsid_min = latest_map_all.get(day_key, {})
 
                 for (eid, wsid), rows in coalesced.items():
                     if wsid is None:
@@ -1821,8 +1854,13 @@ def save():
                         if has_fixed:
                             obs = ""
                         else:
-                            latest_end = latest_end_by_wsid.get(wsid, None)
-                            obs = "C" if latest_end and e_t == (latest_end if latest_end != time(0,0) else time(23,59)) else "BT"
+                            # usa el fin en minutos del bloque coalescido
+                            end_min = e_min
+                            latest_end_min = latest_end_by_wsid_min.get(str(wsid)) if wsid is not None else None
+                            if wsid is None:
+                                obs = "VAC" if emp.abs_reason.get(d,'')=='VAC' else "ABS"
+                            else:
+                                obs = "C" if (latest_end_min is not None and end_min == latest_end_min) else "BT"
 
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
