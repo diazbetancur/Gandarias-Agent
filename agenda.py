@@ -1775,17 +1775,34 @@ def generate(week_start: date):
             latest_end_min = latest_end_by_day.get(day_key)
             cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
 
+            
             # Etiqueta según CA3: hora fija si aplica, sino C/BT global por día
-            end_label = None
             end_label = None
             enforced_us = (emp.id, d) not in overrides  # día con UserShift enforzado
 
             # Hora exacta si ShiftType tiene fin fijo
             if dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
-                end_label = dm.shift_type['end_time'].strftime('%H:%M')
-            # O bien, si el día está en UserShift enforzado, mostrar hora real del bloque
-            elif enforced_us and dm.wsid is not None:
-                end_label = (dm.end if dm.end != time(0,0) else time(23,59)).strftime('%H:%M')
+                end_label = dm.shift_type['end_time'].strftime('%H:%M')            
+            ws_latest_map = res.get("latest_end_by_wsid", {}).get(day_key, {})
+            ws_latest_end_min = ws_latest_map.get(str(dm.wsid)) if dm.wsid is not None else None
+            cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
+
+            # ¿Ese día es UserShift enforzado para este empleado?
+            enforced_us = (emp.id, d) not in overrides  # ya lo tienes calculado arriba
+
+            # Lógica de observación
+            if dm.wsid is None:
+                obs = "VAC" if emp.abs_reason.get(d) == "VAC" else "ABS"
+            else:
+                # Si es UserShift enforzado y termina al final del día del WS → observación vacía
+                if enforced_us and ws_latest_end_min is not None and cur_end_min == ws_latest_end_min:
+                    obs = ""
+                # Si tiene hora fija por ShiftType
+                elif dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
+                    obs = dm.shift_type['end_time'].strftime('%H:%M')
+                # Caso normal: C si termina al final del día, BT en otros casos
+                else:
+                    obs = "C" if (ws_latest_end_min is not None and cur_end_min == ws_latest_end_min) else "BT"
 
             
             res["schedule"][k].append({
@@ -1795,10 +1812,7 @@ def generate(week_start: date):
                 "workstation_name": dm.wsname,
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
-                "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                                else "ABS" if dm.wsid is None
-                                else (end_label if end_label is not None
-                                      else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT")))
+                "observation": obs
             })
 
     return res, sched, emps, week, fixed_ids
@@ -1880,6 +1894,27 @@ def generate_flexible(week_start: date):
 
             if dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
                 end_label = dm.shift_type['end_time'].strftime('%H:%M')
+            day_key = d.isoformat()
+            ws_latest_map = res.get("latest_end_by_wsid", {}).get(day_key, {})
+            ws_latest_end_min = ws_latest_map.get(str(dm.wsid)) if dm.wsid is not None else None
+            cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
+
+            # ¿Ese día es UserShift enforzado para este empleado?
+            enforced_us = (emp.id, d) not in overrides  # ya lo tienes calculado arriba
+
+            # Lógica de observación
+            if dm.wsid is None:
+                obs = "VAC" if emp.abs_reason.get(d) == "VAC" else "ABS"
+            else:
+                # Si es UserShift enforzado y termina al final del día del WS → observación vacía
+                if enforced_us and ws_latest_end_min is not None and cur_end_min == ws_latest_end_min:
+                    obs = ""
+                # Si tiene hora fija por ShiftType
+                elif dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
+                    obs = dm.shift_type['end_time'].strftime('%H:%M')
+                # Caso normal: C si termina al final del día, BT en otros casos
+                else:
+                    obs = "C" if (ws_latest_end_min is not None and cur_end_min == ws_latest_end_min) else "BT"
 
             
             res["schedule"][k].append({
@@ -1889,10 +1924,7 @@ def generate_flexible(week_start: date):
                 "workstation_name": dm.wsname,
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
-                "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                                else "ABS" if dm.wsid is None
-                                else (end_label if end_label is not None
-                                      else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT")))
+                "observation": obs
             })
     
     return res, sched, emps, week, set()
@@ -1960,8 +1992,10 @@ def save():
     force = data.get('force', False)
     flexible = data.get('flexible', True)
     if not wk: return jsonify({"error":"Falta week_start"}), 400
-    try: ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
-    except ValueError: return jsonify({"error":"Fecha inválida"}), 400
+    try:
+        ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
+    except ValueError:
+        return jsonify({"error":"Fecha inválida"}), 400
     we = ws + timedelta(days=6)
 
     try:
@@ -1969,7 +2003,7 @@ def save():
     except (DatabaseConnectionError, DataNotFoundError) as e:
         return jsonify({"error": str(e)}), 400
 
-    # Inserción determinista (coalescida) con calc_obs
+    # Inserción determinista (coalescida) con la nueva lógica de observación
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute('SELECT COUNT(*) FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
@@ -1977,6 +2011,17 @@ def save():
                 return jsonify({"error": "Horario ya existe para esa semana"}), 409
             if force:
                 cur.execute('DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
+
+            # Reconstruir overrides (días en free_mode). Si NO está aquí ⇒ usershift_enforced
+            overrides_list = (res.get("summary", {}) or {}).get("usershift_free_overrides", []) or []
+            overrides_set = {
+                (str(o.get("employee_id")), datetime.fromisoformat(o.get("date")).date())
+                for o in overrides_list
+                if o.get("employee_id") and o.get("date")
+            }
+
+            latest_map_all_by_wsid = res.get("latest_end_by_wsid", {}) or {}
+            latest_map_all_by_day  = res.get("latest_end_of_day", {}) or {}
 
             for d in sorted(sched.keys()):
                 ass = sorted(sched[d], key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start)))
@@ -1993,37 +2038,50 @@ def save():
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
-                latest_map_all = res.get("latest_end_by_wsid", {})
                 day_key = d.isoformat()
-                # { wsid_str -> end_min }
-                latest_end_by_wsid_min = latest_map_all.get(day_key, {})
+                # { wsid_str -> end_min } y fin global del día
+                latest_end_by_wsid_min = latest_map_all_by_wsid.get(day_key, {}) or {}
+                latest_end_of_day_min  = latest_map_all_by_day.get(day_key, None)
 
                 for (eid, wsid), rows in coalesced.items():
                     if wsid is None:
                         continue
+
                     for emp, s_min, e_min, src_dms in rows:
                         s_t = _m2t(s_min)
                         e_t = _m2t(e_min if e_min < 24*60 else 0)
 
-                        dur_min = e_min - s_min               # s_min / e_min ya están en MINUTOS
+                        dur_min = e_min - s_min
                         if dur_min < MIN_SHIFT_DURATION_HOURS * 60:
                             if ASCII_LOGS:
                                 print(f"[SAVE-GUARD] Bloque <{MIN_SHIFT_DURATION_HOURS}h no insertado: "
-                                    f"user={emp.name}, fecha={d}, wsid={wsid}, {s_t.strftime('%H:%M')}-{e_t.strftime('%H:%M')}")
+                                      f"user={emp.name}, fecha={d}, wsid={wsid}, {s_t.strftime('%H:%M')}-{e_t.strftime('%H:%M')}")
                             continue
 
                         has_fixed = any((emp.id, dm.id) in fixed_ids for dm in src_dms)
                         if has_fixed:
                             obs = ""
                         else:
-                            # usa el fin en minutos del bloque coalescido
-                            end_min = e_min
-                            latest_end_min = latest_end_by_wsid_min.get(str(wsid)) if wsid is not None else None
-                            if wsid is None:
-                                obs = "VAC" if emp.abs_reason.get(d,'')=='VAC' else "ABS"
-                            else:
-                                obs = "C" if (latest_end_min is not None and end_min == latest_end_min) else "BT"
+                            enforced_us = (str(emp.id), d) not in overrides_set
 
+                            if wsid is None:
+                                obs = "VAC" if emp.abs_reason.get(d, '') == 'VAC' else "ABS"
+                            else:
+                                last_wsid_end = latest_end_by_wsid_min.get(str(wsid))        # fin del día por puesto
+                                last_day_end  = latest_end_of_day_min                        # fin global del día (cualquier puesto)
+
+                                # Si es usershift_enforced y el bloque termina cuando termina el día
+                                # del puesto O cuando termina el día global → sin observación.
+                                if enforced_us and (
+                                    (last_wsid_end is not None and e_min == last_wsid_end) or
+                                    (last_day_end  is not None and e_min == last_day_end)
+                                ):
+                                    obs = ""
+                                # Si NO es usershift_enforced, aplica la regla normal C/BT por puesto
+                                elif (last_wsid_end is not None and e_min == last_wsid_end):
+                                    obs = "C"
+                                else:
+                                    obs = "BT"
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId","StartTime","EndTime","Observation","IsDeleted","DateCreated")
@@ -2031,7 +2089,7 @@ def save():
                         ''', (
                             uid(), d, str(emp.id), str(wsid),
                             timedelta(hours=s_t.hour, minutes=s_t.minute),
-                            timedelta(hours=e_t.hour,   minutes=e_t.minute),
+                            timedelta(hours=e_t.hour, minutes=e_t.minute),
                             obs, False, now()
                         ))
             c.commit()
