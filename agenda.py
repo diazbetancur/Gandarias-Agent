@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v3.14 (determinista + reglas split + fallback greedy)
+AGENDA GENERATOR API – Gandarías v3.15c (determinista + reglas split + fallback greedy)
 • Intento flexible con CP-SAT. Si el modelo no es factible, caemos a planificador GREEDY de emergencia.
 • UserShifts obligatorios si el día del empleado tiene ≥4h viables dentro de sus ventanas (y ST compatibles);
   si no, el día pasa a “asignación libre” (override) y se reporta el motivo en el summary.
@@ -30,7 +30,7 @@ MIN_HOURS_BETWEEN_SHIFTS = 9
 MIN_HOURS_BETWEEN_SPLIT = 3     # ← se sobreescribe desde BD (regla adicional)
 MAX_DAYS_PER_WEEK = 6
 MAX_HOURS_PER_DAY = 9
-MIN_SHIFT_DURATION_HOURS = 4
+MIN_SHIFT_DURATION_HOURS = 3
 HARD_REQUIRE_USERSHIFT = True
 
 # Pesos
@@ -121,6 +121,25 @@ def build_latest_end_map_from_demands(demands):
     # convertir claves a strings (ISO/str) para serializar
     latest_iso = {d.isoformat(): {str(w): m for w, m in m2.items()} for d, m2 in latest.items()}
     return latest_iso
+
+
+def build_latest_end_of_day_map(demands):
+    """
+    Devuelve: { date_iso -> end_min }, donde end_min es la última hora de fin
+    considerando TODAS las estaciones/puestos del día. Si alguna demanda termina
+    a 00:00, se interpreta como 23:59 (1439).
+    """
+    latest = {}
+    for dm in demands:
+        if dm.wsid is None:
+            continue
+        end_t = dm.end if dm.end != time(0,0) else time(23,59)
+        end_m = _t2m(end_t)
+        key = dm.date.isoformat() if hasattr(dm.date, 'isoformat') else str(dm.date)
+        prev = latest.get(key, -1)
+        if end_m > prev:
+            latest[key] = end_m
+    return latest
 
 
 def _t2m(t: time) -> int:
@@ -330,8 +349,8 @@ def inside_usershift_window(emp: Emp, dm: Demand, overrides: Set[Tuple[str, date
 def _usershift_day_eligibility(emp: Emp, ddate: date) -> tuple:
     """
     Devuelve (ok: bool, kind: 'single'|'split'|None, reason: str).
-    - 'single': un bloque continuo ≥4h
-    - 'split' : dos bloques, cada uno ≥4h y gap ≥ MIN_HOURS_BETWEEN_SPLIT
+    La estructura del US (single/split) se valida solo por forma (ventanas),
+    no por demanda. La demanda mínima se comprueba aparte.
     """
     dow = ddate.weekday()
     wins = sorted(emp.user_shift_windows.get(dow, []), key=lambda w: (_t2m(w[0]), _t2m(w[1])))
@@ -340,7 +359,7 @@ def _usershift_day_eligibility(emp: Emp, ddate: date) -> tuple:
 
     # fusionar solapes
     merged = []
-    for s,e in wins:
+    for s, e in wins:
         smin, emin = _t2m(s), _t2m(e if e != time(0,0) else time(23,59))
         if not merged or smin > merged[-1][1]:
             merged.append([smin, emin])
@@ -348,23 +367,47 @@ def _usershift_day_eligibility(emp: Emp, ddate: date) -> tuple:
             merged[-1][1] = max(merged[-1][1], emin)
 
     if len(merged) == 1:
-        if (merged[0][1] - merged[0][0]) >= MIN_SHIFT_DURATION_HOURS * 60:
-            return True, "single", "ok"
-        return False, None, "usershift_block_lt_4h"
-
+        return True, "single", "ok"
     if len(merged) >= 2:
         a, b = merged[0], merged[1]
-        dur_a = a[1] - a[0]
-        dur_b = b[1] - b[0]
-        gap   = b[0] - a[1]
-        if (dur_a >= MIN_SHIFT_DURATION_HOURS*60 and
-            dur_b >= MIN_SHIFT_DURATION_HOURS*60 and
-            gap   >= MIN_HOURS_BETWEEN_SPLIT*60):
+        gap = b[0] - a[1]
+        if gap >= MIN_HOURS_BETWEEN_SPLIT * 60:
             return True, "split", "ok"
-        return False, None, "usershift_split_not_valid"
+        return False, None, "usershift_split_gap_lt_min"
 
     return False, None, "usershift_structure_unsupported"
 
+
+def _minutes_candidate_in_usershift(emp: Emp, ddate: date, demands: List[Demand]) -> Tuple[int, str]:
+    """Suma de minutos de demanda dentro de cualquier ventana de US del día.
+       Si total >= 3h ⇒ hay volumen para hacer obligatorio el UserShift.
+       IMPORTANTE: aquí NO miramos 0–5 ni ShiftTypes; solo ventanas y roles.
+    """
+    dow = ddate.weekday()
+    wins = emp.user_shift_windows.get(dow)
+    if not wins:
+        return 0, "no_usershift_for_day"
+
+    total = 0
+    any_inside = False
+    for dm in demands:
+        if dm.date != ddate:
+            continue
+        if not emp.can(dm.wsid):
+            continue
+        end = dm.end if dm.end != time(0,0) else time(23,59)
+        for w_s, w_e in wins:
+            w_end = w_e if w_e != time(0,0) else time(23,59)
+            if dm.start >= w_s and end <= w_end:
+                any_inside = True
+                total += duration_min(dm)   # ← ¡aquí se suman los minutos!
+                break
+
+    if not any_inside:
+        return 0, "no_demands_inside_window"
+    if total < MIN_SHIFT_DURATION_HOURS * 60:
+        return total, "insufficient_volume_for_3h"
+    return total, "ok"
 
 # ───────── TEMPLATE PICKER ─────────
 def pick_template(cur, week_start: date, week_end: date):
@@ -458,6 +501,8 @@ def load_data(week_start: date):
     with conn() as c, c.cursor() as cur:
         # 1) Plantilla y demandas
         tpl_id, tpl_name = pick_template(cur, week_start, week_end)
+        global MIN_HOURS_BETWEEN_SPLIT, MIN_HOURS_BETWEEN_SHIFTS, MAX_HOURS_PER_DAY
+        min_hours_required = 0
         demands = [Demand(r) for r in fetchall(cur, '''
             SELECT d."Id", %s + d."Day"*interval '1 day',
                    d."WorkstationId", w."Name",
@@ -594,13 +639,26 @@ def load_data(week_start: date):
                 'start_time': row[3], 'end_time': row[4], 'is_split': row[5], 'is_active': row[6]
             })
 
-        # 6) UserShifts  (soporta "abierto" si *_lastStart es NULL ⇒ hasta 23:59)
+        # 6) UserShifts – regla: si hay 2 inicios y falta algún lastStart,
+        # el bloque temprano dura 3h y el tardío ocupa el resto (hasta 6h) sin solaparse.
+        def _cap_end(start_t: time, end_t: time) -> time:
+            # cap por fin de día y por 9h desde el inicio
+            end_m = min(
+                _t2m(end_t if end_t != time(0,0) else time(23,59)),
+                _t2m(start_t) + MAX_HOURS_PER_DAY * 60
+            )
+            return _m2t(end_m if end_m < 24*60 else 0)
+
+        def _plus_minutes(t: time, minutes: int) -> time:
+            m = min(_t2m(t) + minutes, 24*60 - 1)  # 23:59 hard stop
+            return _m2t(m)
+
         for uid7, day, structure, b1s, b1e, b2s, b2e in fetchall(cur, '''
             SELECT "UserId","Day","Structure",
-                   (TIMESTAMP '2000-01-01' + "Block1Start")::time,
-                   (TIMESTAMP '2000-01-01' + "Block1lastStart")::time,
-                   (TIMESTAMP '2000-01-01' + "Block2Start")::time,
-                   (TIMESTAMP '2000-01-01' + "Block2lastStart")::time
+                (TIMESTAMP '2000-01-01' + "Block1Start")::time,
+                (TIMESTAMP '2000-01-01' + "Block1lastStart")::time,
+                (TIMESTAMP '2000-01-01' + "Block2Start")::time,
+                (TIMESTAMP '2000-01-01' + "Block2lastStart")::time
             FROM "Management"."UserShifts"
             ORDER BY "UserId","Day","Block1Start","Block2Start"
         '''):
@@ -608,28 +666,55 @@ def load_data(week_start: date):
                 continue
             emp = emps_map[uid7]
 
-            # si *_lastStart es NULL ⇒ ventana abierta hasta 23:59
-            b1e_eff = (b1e if b1e else time(23,59))
-            b2e_eff = (b2e if b2e else time(23,59))
+            b1e_eff = None
+            b2e_eff = None
 
-            if b1s and b1s < b1e_eff:
+            if b1s and b2s:
+                # Bloque 1 = exactamente 3h desde b1s
+                fixed_3h_end = _plus_minutes(b1s, MIN_SHIFT_DURATION_HOURS * 60)  # MIN_SHIFT_DURATION_HOURS=3
+                # Si por datos b1e viene, respeta el más corto entre (3h fijas) y el propio b1e capado
+                b1e_eff = _cap_end(b1s, fixed_3h_end)
+
+                # Bloque 2 = resto hasta 9h totales (máx 6h), respetando b2e si viene
+                late_allow_min = MAX_HOURS_PER_DAY * 60 - MIN_SHIFT_DURATION_HOURS * 60  # 9h - 3h = 6h
+                b2e_candidate = b2e or time(23,59)
+                b2e_cap = _m2t(min(_t2m(b2e_candidate), _t2m(b2s) + late_allow_min))
+                b2e_eff = _cap_end(b2s, b2e_cap)
+
+                # Nunca solapar: si el fin del 1.º supera el inicio del 2.º, recortar el 1.º
+                if _t2m(b1e_eff) > _t2m(b2s):
+                    b1e_eff = b2s
+
+            else:
+                # Casos con un solo inicio: lógica original, cap 9h
+                if b1s:
+                    b1e_eff = _cap_end(b1s, b1e or time(23,59))
+                if b2s:
+                    b2e_eff = _cap_end(b2s, b2e or time(23,59))
+
+            # Evitar solape si existen ambas ventanas
+            if b1s and b2s and b1e_eff and (_t2m(b1e_eff) > _t2m(b2s)):
+                b1e_eff = b2s
+
+            # Registrar ventanas resultantes
+            if b1s and b1e_eff and b1s < b1e_eff:
                 emp.user_shift_windows[day].append((b1s, b1e_eff))
-            if b2s and b2s < b2e_eff:
+            if b2s and b2e_eff and b2s < b2e_eff:
                 emp.user_shift_windows[day].append((b2s, b2e_eff))
 
-            # mapa de ShiftTypes compatibles con cada ventana del día
+            # ShiftTypes compatibles con cualquiera de las dos ventanas
             for st in shift_types:
                 ss = _t2m(st['start_time'])
                 se = _t2m(st['end_time']) if st['end_time'] != time(0,0) else 24*60
                 def fits(a, b): return ss <= _t2m(a) and _t2m(b) <= se
-                if ((b1s and fits(b1s, b1e_eff)) or
-                    (b2s and fits(b2s, b2e_eff))):
+                if ((b1s and b1e_eff and fits(b1s, b1e_eff)) or
+                    (b2s and b2e_eff and fits(b2s, b2e_eff))):
                     emp.user_shifts[day].add(st['id'])
 
 
+
         # 7) Leyes
-        global MIN_HOURS_BETWEEN_SPLIT, MIN_HOURS_BETWEEN_SHIFTS, MAX_HOURS_PER_DAY
-        min_hours_required = 0
+        
 
         row = fetchall(cur, '''
             SELECT "CantHours" FROM "Management"."LawRestrictions"
@@ -673,34 +758,7 @@ def load_data(week_start: date):
     return emps, demands, tpl_name, week, {}, shift_types, min_hours_required
 
 # ───────── UserShift planner (enforce vs free) ─────────
-def _minutes_candidate_in_usershift(emp: Emp, ddate: date, demands: List[Demand]) -> Tuple[int, str]:
-    dow = ddate.weekday()
-    if not emp.user_shift_windows.get(dow):
-        return 0, "no_usershift_for_day"
 
-    total = 0
-    any_inside = False
-    for dm in demands:
-        if dm.date != ddate: continue
-        if not (emp.can(dm.wsid) and emp.available(dm.date, dm.start, dm.end)): continue
-        end = dm.end if dm.end != time(0,0) else time(23,59)
-        in_any = False
-        for w_s, w_e in emp.user_shift_windows[dow]:
-            w_end = w_e if w_e != time(0,0) else time(23,59)
-            if dm.start >= w_s and end <= w_end:
-                in_any = True; break
-        if not in_any: continue
-        any_inside = True
-        if hasattr(dm, 'shift_type') and dm.shift_type:
-            if dm.shift_type['id'] not in emp.user_shifts.get(dow, set()):
-                return 0, "shift_type_not_allowed"
-        total += duration_min(dm)
-
-    if not any_inside:
-        return 0, "no_demands_inside_window"
-    if total < MIN_SHIFT_DURATION_HOURS * 60:
-        return total, "insufficient_volume_for_4h"
-    return total, "ok"
 
 def plan_usershift_day_modes(emps: List[Emp], demands: List[Demand], week: List[date]):
     overrides = set()
@@ -747,79 +805,114 @@ def add_usershift_must_cover_if_possible_with_overrides(mdl, emps, dem, X, overr
     if not HARD_REQUIRE_USERSHIFT:
         return
 
-    # Index por fecha
+    # index de demandas por día
     by_date = defaultdict(list)
     for d in dem:
         by_date[d.date].append(d)
 
     for e in emps:
-        # Recorremos todos los días con demanda
         for day, day_dems in sorted(by_date.items(), key=lambda kv: kv[0]):
             if (e.id, day) in overrides:
-                continue  # ese día no se fuerza
+                continue  # día en modo libre → no forzamos UserShift
 
             dow = day.weekday()
-            wins = sorted(e.user_shift_windows.get(dow, []), key=lambda w: (_t2m(w[0]), _t2m(w[1])))
+            wins = sorted(e.user_shift_windows.get(dow, []),
+                          key=lambda w: (_t2m(w[0]), _t2m(w[1])))
             if not wins:
                 continue
 
-            # Tomamos hasta 2 ventanas (estructura partido)
-            taken = 0
-            for (w_s, w_e) in wins:
-                if taken >= 2:
-                    break
-                taken += 1
+            # Tomamos como mucho 2 ventanas (split)
+            wins = wins[:2]
 
+            y_wins = []           # y_win por ventana
+            have_cands = []       # hay candidatos en esa ventana
+            for (w_s, w_e) in wins:
                 w_end = w_e if w_e != time(0,0) else time(23,59)
+
                 cands = []
                 min_minutes_terms = []
+                cands_at_start = []
 
                 for dm in day_dems:
-                    if (e.id, dm.id) not in X:
+                    key = (e.id, dm.id)
+                    if key not in X:
                         continue
                     end = dm.end if dm.end != time(0,0) else time(23,59)
+
+                    # elegible dentro de ventana
                     if not (dm.start >= w_s and end <= w_end):
                         continue
-                    if hasattr(dm, 'shift_type') and dm.shift_type:
-                        if dm.shift_type['id'] not in e.user_shifts.get(dow, set()):
-                            continue
-                    cands.append(X[e.id, dm.id])
-                    # minutos de este trozo (para la cota de ≥4h si se usa)
-                    min_minutes_terms.append(duration_min(dm) * X[e.id, dm.id])
+
+                    cands.append(X[key])
+                    min_minutes_terms.append(duration_min(dm) * X[key])
+
+                    # preferimos cubrir el inicio de la ventana si existe demanda que lo toque
+                    if dm.start == w_s or (dm.start < w_s and end > w_s):
+                        cands_at_start.append(X[key])
 
                 if not cands:
-                    # No hay candidatos en esta ventana: no la obligamos explícitamente.
+                    have_cands.append(False)
                     continue
 
-                # 1) Al menos 1 asignación dentro de la ventana
+                have_cands.append(True)
+
+                # al menos un segmento en la ventana
                 mdl.Add(sum(cands) >= 1)
 
-                # 2) Si se trabaja en la ventana, debe sumar ≥ 4h
+                # si hay algo en la ventana ⇒ al menos 3h
                 y_win = mdl.NewBoolVar(f"y_win_{e.id}_{day.isoformat()}_{_t2m(w_s)}_{_t2m(w_end)}")
                 mdl.Add(sum(cands) >= y_win)
                 mdl.Add(sum(cands) <= 1000 * y_win)
                 mdl.Add(sum(min_minutes_terms) >= MIN_SHIFT_DURATION_HOURS * 60 * y_win)
+                y_wins.append(y_win)
+
+                # cubrir el arranque si hay candidatos que toquen w_s
+                if cands_at_start:
+                    mdl.Add(sum(cands_at_start) >= 1)
+
+            # *** NUEVO: si es día con estructura "split" (2 ventanas reales) y
+            # *** hay candidatos en ambas, exigir usar LAS DOS (dos bloques).
+            if len(y_wins) == 2 and all(have_cands):
+                mdl.Add(y_wins[0] + y_wins[1] >= 2)
 
 # ───────── Utilidades solver (estricto/flexible) ─────────
 def groups_without_usershift_candidates(emps: List[Emp], dem: List[Demand], overrides_emp_day: Set[Tuple[str, date]]):
     group_needs_relax = set()
     by_group = defaultdict(list)
-    for d in dem: by_group[(d.date, d.wsid)].append(d)
+    for d in dem:
+        by_group[(d.date, d.wsid)].append(d)
+
     for (gdate, wsid), dlist in sorted(by_group.items(), key=lambda x: (x[0][0], str(x[0][1]))):
         found_any = False
         for emp in emps:
             for dm in dlist:
-                if not (emp.can(dm.wsid) and emp.available(dm.date, dm.start, dm.end)): continue
-                if (emp.id, gdate) in overrides_emp_day: found_any = True; break
-                if emp.user_shift_windows.get(gdate.weekday()):
+                if not emp.can(dm.wsid):
+                    continue
+
+                # Si el día está en override (free_mode), NO aplicamos disponibilidad 0–5
+                if (emp.id, gdate) in overrides_emp_day:
+                    found_any = True
+                    break
+
+                # Si no está en override: o bien cae en ventana US válida, o bien (sin US) basta con available()
+                if emp.user_shift_windows.get(gdate.weekday(), []):
                     ok, _ = employee_can_work_demand_with_shifts(emp, dm, gdate.weekday())
-                    if ok: found_any = True; break
+                    if ok:
+                        found_any = True
+                        break
                 else:
-                    found_any = True; break
-            if found_any: break
+                    if emp.available(dm.date, dm.start, dm.end):
+                        found_any = True
+                        break
+
+            if found_any:
+                break
+
         if not found_any:
             group_needs_relax.add((gdate, wsid))
-            if ASCII_LOGS: print(f"[RELAX-GRUPO] (fecha={gdate}, wsid={wsid})")
+            if ASCII_LOGS:
+                print(f"[RELAX-GRUPO] (fecha={gdate}, wsid={wsid})")
+
     return group_needs_relax
 
 def add_max2_blocks_per_day(mdl, emps, dem, X):
@@ -860,36 +953,25 @@ def build_consolidation_cost(mdl, emps, dem, X):
     return sum(y_vars) if y_vars else 0
 
 def build_usershift_window_penalty(mdl, emps, dem, X, overrides=set()):
-    """
-    Crea una suma de booleanos que valen 1 cuando asignamos (e,dm) FUERA de la ventana de UserShift
-    teniendo ventanas ese día y sin override. El objetivo la minimizará ⇒ preferirá asignar dentro.
-    """
     penalties = []
     for d in dem:
         for e in emps:
             key = (e.id, d.id)
             if key not in X:
                 continue
-            # si el empleado tiene ventana ese día y NO está en override
             if e.user_shift_windows.get(d.date.weekday(), []) and (e.id, d.date) not in overrides:
                 end = d.end if d.end != time(0,0) else time(23,59)
                 in_any = False
                 for ws, we in e.user_shift_windows[d.date.weekday()]:
                     w_end = we if we != time(0,0) else time(23,59)
                     if d.start >= ws and end <= w_end:
-                        # si la demanda tiene ST, debe ser compatible
-                        if d.shift_type and d.shift_type['id'] not in e.user_shifts.get(d.date.weekday(), set()):
-                            continue
                         in_any = True
                         break
                 if not in_any:
-                    # z = 1 si usamos este X fuera de ventana
                     z = mdl.NewBoolVar(f"pen_outside_us_{e.id}_{d.id}")
-                    mdl.Add(z >= X[key])   # z >= x  ⇒ si x=1, z puede ser 1; objetivo hará el resto
+                    mdl.Add(z >= X[key])
                     penalties.append(z)
-    # peso moderado: no debe romper cobertura, solo inclinar la balanza
     return (WEIGHT_USERWINDOW * sum(penalties)) if penalties else 0
-
 
 def add_min_split_gap(mdl, emps, dem, X, min_gap_hours: int):
     # *** ELIMINADA del flujo: nos quedamos con la versión por ventanas de UserShift ***
@@ -987,55 +1069,86 @@ def add_min_per_contiguous_block(mdl, emps, dem, X, min_hours: int):
 
                 i = j + 1
 
+
 def build_variables(mdl, emps, dem, overrides_emp_day, relax_groups):
     X = {}
     dem_sorted = sorted(dem, key=lambda d: (d.date, _t2m(d.start), _t2m(d.end), str(d.wsid)))
     for d in dem_sorted:
         for e in emps:
-            if not (e.can(d.wsid) and e.available(d.date, d.start, d.end)):
+            # Prioridad CA1: si el día NO está en overrides (usershift_enforced),
+            # no aplicamos disponibilidad general; sólo verificamos habilitación.
+            free_today = (e.id, d.date) in overrides_emp_day
+            if not e.can(d.wsid): 
+                continue
+            if free_today and not e.available(d.date, d.start, d.end):
+                # en free_mode sí respetamos disponibilidad general
                 continue
             # si el grupo está relajado, permitimos fuera de ventana de usershift
+
             relax_this_group = (d.date, d.wsid) in relax_groups
             dow = d.date.weekday()
             end = d.end if d.end != time(0,0) else time(23,59)
             free_today = (e.id, d.date) in overrides_emp_day
 
+            # si el empleado tiene ventana ese día y NO está en override/relax
             if not free_today and not relax_this_group and e.user_shift_windows.get(dow):
                 in_window = False
+                # ordenar por inicio
                 for w_s, w_e in sorted(e.user_shift_windows[dow], key=lambda w: (_t2m(w[0]), _t2m(w[1]))):
-                    w_end = w_e if w_e != time(0,0) else time(23,59)
+                    w_end = w_e if w_e != time(0, 0) else time(23, 59)
                     if d.start >= w_s and end <= w_end:
-                        in_window = True; break
-                if not in_window: 
-                    continue
-                if hasattr(d, 'shift_type') and d.shift_type:
-                    if d.shift_type['id'] not in e.user_shifts.get(dow, set()):
-                        continue
+                        in_window = True
+                        break
+                if not in_window:
+                    continue  # ← fuera de ventana US; no crear variable para este emp-dem
+
+            # [PATCH] No exigimos compatibilidad de shift_type en usershift_enforced
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
-    if ASCII_LOGS: print(f"[VARS]  {{'comb': {len(emps)*len(dem)}, 'allow': {len(X)}}}")
+
+            if ASCII_LOGS:
+                print(f"[VARS]  {{'comb': {len(emps)*len(dem)}, 'allow': {len(X)}}}")
+
     return X
+
 
 def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[str, date]]):
     X = {}
     dem_sorted = sorted(dem, key=lambda d: (d.date, _t2m(d.start), _t2m(d.end), str(d.wsid)))
     for d in dem_sorted:
         for e in emps:
-            if not (e.can(d.wsid) and e.available(d.date, d.start, d.end)):
-                continue
-            dow = d.date.weekday()
-            end = d.end if d.end != time(0,0) else time(23,59)
             free_today = (e.id, d.date) in overrides
+            if not e.can(d.wsid):
+                continue
+            if free_today and not e.available(d.date, d.start, d.end):
+                continue
+
+            dow = d.date.weekday()
+            end = d.end if d.end != time(0, 0) else time(23, 59)
+            free_today = (e.id, d.date) in overrides
+
+            # En días con ventana de UserShift, sólo exigimos caer en ventana (UserShift > ShiftType)
             if not free_today and e.user_shift_windows.get(dow):
                 in_window = False
-                for w_s, w_e in sorted(e.user_shift_windows[dow], key=lambda w: (_t2m(w[0]), _t2m(w[1]))):
-                    w_end = w_e if w_e != time(0,0) else time(23,59)
-                    if d.start >= w_s and end <= w_end: in_window = True; break
-                if not in_window: continue
-                if hasattr(d, 'shift_type') and d.shift_type:
-                    if d.shift_type['id'] not in e.user_shifts.get(dow, set()):
-                        continue
+                # Ordena ventanas por (inicio, fin)
+                for w_s, w_e in sorted(
+                    e.user_shift_windows[dow],
+                    key=lambda w: (_t2m(w[0]), _t2m(w[1]))
+                ):
+                    w_end = w_e if w_e != time(0, 0) else time(23, 59)
+
+                    if d.start >= w_s and end <= w_end:
+                        in_window = True
+                        break
+
+                if not in_window:
+                    continue  # fuera de UserShift → no crear variable para este emp-dem
+
+            # [PATCH] No exigimos compatibilidad de shift_type en usershift_enforced
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
-    if ASCII_LOGS: print(f"[VARS]  {{'comb': {len(emps)*len(dem)}, 'allow': {len(X)}}}")
+
+            if ASCII_LOGS:
+                print(f"[VARS]  {{'comb': {len(emps) * len(dem)}, 'allow': {len(X)}}}")
+
     return X
 
 # ───────── SOLVER ESTRICTO ─────────
@@ -1087,7 +1200,7 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date],
     # Requisito por BLOQUE contiguo ≥ 4h:
     add_min_per_contiguous_block(mdl, emps, dem, X, MIN_SHIFT_DURATION_HOURS)
     # Ya no llamamos: add_min_shift_duration_approx / add_no_short_isolated_segments / add_min_hours_per_day_per_workstation
-    add_usershift_must_cover_if_possible(mdl, emps, dem, X)
+    add_usershift_must_cover_if_possible_with_overrides(mdl, emps, dem, X, overrides_emp_day)
 
     groups = defaultdict(list)
     for d in dem: groups[(d.date, d.wsid)].append(d)
@@ -1194,9 +1307,7 @@ def _fits_usershift_enforced(emp: Emp, dm: Demand) -> bool:
     in_any = any(dm.start >= ws and end <= (we if we != time(0,0) else time(23,59))
                  for ws, we in emp.user_shift_windows[dow])
     if not in_any: return False
-    if hasattr(dm, 'shift_type') and dm.shift_type:
-        if dm.shift_type['id'] not in emp.user_shifts.get(dow, set()):
-            return False
+    # [PATCH] No condicionamos por shift_type cuando el día está usershift_enforced
     return True
 
 def _has_overlap(intervals: List[Tuple[int,int]], s: int, e: int) -> bool:
@@ -1339,8 +1450,7 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 w_end = we if we != time(0,0) else time(23,59)
                 if dm.start >= ws and end <= w_end:
                     # si hay ShiftType en la demanda, también debe ser compatible
-                    if dm.shift_type and dm.shift_type['id'] not in emp.user_shifts.get(dow, set()):
-                        return False
+                # [PATCH] Sin filtro por shift_type en usershift_enforced
                     return True
             return False
 
@@ -1351,10 +1461,16 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 continue
             if dm.date != dday or dm.wsid is None:
                 continue
-            if not (emp.can(dm.wsid) and emp.available(dm.date, dm.start, dm.end)):
+            if not emp.can(dm.wsid):
                 continue
-            if enforced and not fits_usershift(dm):
-                continue
+            if enforced:
+                # En enforced: NO exigimos disponibilidad general, sólo ventana US
+                if not fits_usershift(dm):
+                    continue
+            else:
+                # En free_mode: sí exigimos disponibilidad 0–5/Excepciones
+                if not emp.available(dm.date, dm.start, dm.end):
+                    continue
 
             s = _t2m(dm.start)
             e = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
@@ -1405,8 +1521,14 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                     break
                 if len(days_worked[emp.id]) >= MAX_DAYS_PER_WEEK and day not in days_worked[emp.id]:
                     continue
-                if not (emp.can(dm.wsid) and emp.available(dm.date, dm.start, dm.end)):
+                if not emp.can(dm.wsid):
                     continue
+
+                enforced = (emp.id, day) not in overrides
+                if not enforced:
+                    # free_mode: sí pedimos disponibilidad general
+                    if not emp.available(dm.date, dm.start, dm.end):
+                        continue
 
                 # 1) intentar CADENA contigua ≥ 4h empezando en este trozo
                 chain = try_build_chain(emp, group, idx)
@@ -1518,13 +1640,25 @@ def _bucket_minutes_after_merge(bucket_intervals, key, seg_s, seg_e):
             merged[-1][1] = max(merged[-1][1], e)
     return sum(b - a for a, b in merged), [(a, b) for a, b in merged]
 
+
 def calc_obs(emp: Emp, dm: Demand, assigns_day: list, fixed_ids: set):
-    if (emp.id, dm.id) in fixed_ids: return ""
-    same_ws = [d for e2, d in assigns_day if d.wsid == dm.wsid and d.date == dm.date and d.wsid is not None]
-    if not same_ws: return "BT"
-    latest_end = max(d.end if d.end != time(0,0) else time(23,59) for d in same_ws)
+    """
+    CA3: Etiquetas de salida
+    - "C": si el turno termina en la ÚLTIMA franja del DÍA (global, no por puesto).
+    - "BT": en los demás casos.
+    - Si el empleado tiene un Tipo de Turno con hora de salida fija para ese día,
+      el caller deberá mostrar la hora exacta (esto se gestiona en generate()).
+    """
+    if (emp.id, dm.id) in fixed_ids:
+        return ""
+    # Ignorar pseudo-demandas sin wsid
+    same_day = [d for e2, d in assigns_day if d.date == dm.date and d.wsid is not None]
+    if not same_day:
+        return "BT"
+    latest_end = max(d.end if d.end != time(0,0) else time(23,59) for d in same_day)
     current_end = dm.end if dm.end != time(0,0) else time(23,59)
     return "C" if current_end == latest_end else "BT"
+
 
 def build_usershift_reports(emps, week, usershift_plan, sched):
     def _covered_inside_window(emp: Emp, day: date) -> bool:
@@ -1611,7 +1745,8 @@ def generate(week_start: date):
 
     relaxed_list = [{"date": gdate.isoformat(), "workstation_id": str(wsid)}
                     for (gdate, wsid) in sorted(relaxed_groups, key=lambda x: (x[0], str(x[1])))]
-    latest_end_map = build_latest_end_map_from_demands(demands)
+    latest_end_by_wsid = build_latest_end_map_from_demands(demands)
+    latest_end_by_day = build_latest_end_of_day_map(demands)
     res = {
         "template": tpl,
         "week_start": week_start.isoformat(),
@@ -1627,7 +1762,8 @@ def generate(week_start: date):
             "usershift_assignment_report": usershift_assignment_report,
             "usershift_windows_report": usershift_windows_report
         },
-        "latest_end_by_wsid": latest_end_map,
+        "latest_end_by_wsid": latest_end_by_wsid,
+        "latest_end_of_day": latest_end_by_day,
         "schedule": {}
     }
     
@@ -1636,10 +1772,22 @@ def generate(week_start: date):
         k = d.isoformat(); res["schedule"][k] = []
         for emp, dm in sorted(sched.get(d, []), key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
             day_key = d.isoformat()
-            latest_for_day = latest_end_map.get(day_key, {})
-            latest_end_min = latest_for_day.get(str(dm.wsid)) if dm.wsid is not None else None
+            latest_end_min = latest_end_by_day.get(day_key)
             cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
 
+            # Etiqueta según CA3: hora fija si aplica, sino C/BT global por día
+            end_label = None
+            end_label = None
+            enforced_us = (emp.id, d) not in overrides  # día con UserShift enforzado
+
+            # Hora exacta si ShiftType tiene fin fijo
+            if dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
+                end_label = dm.shift_type['end_time'].strftime('%H:%M')
+            # O bien, si el día está en UserShift enforzado, mostrar hora real del bloque
+            elif enforced_us and dm.wsid is not None:
+                end_label = (dm.end if dm.end != time(0,0) else time(23,59)).strftime('%H:%M')
+
+            
             res["schedule"][k].append({
                 "employee_id": str(emp.id),
                 "employee_name": emp.name,
@@ -1648,9 +1796,11 @@ def generate(week_start: date):
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
                 "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                    else "ABS" if dm.wsid is None
-                    else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT"))
+                                else "ABS" if dm.wsid is None
+                                else (end_label if end_label is not None
+                                      else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT")))
             })
+
     return res, sched, emps, week, fixed_ids
 
 def generate_flexible(week_start: date):
@@ -1683,12 +1833,14 @@ def generate_flexible(week_start: date):
     overrides_list = [{"employee_id": str(eid),
                        "employee_name": next((e.name for e in emps if e.id == eid), ""),
                        "date": d.isoformat()} for (eid, d), v in usershift_plan.items() if v["mode"] == "free_mode"]
-    latest_end_map = build_latest_end_map_from_demands(demands)
+    latest_end_by_wsid = build_latest_end_map_from_demands(demands)
+    latest_end_by_day = build_latest_end_of_day_map(demands)
     res = {
         "template": tpl,
         "week_start": week_start.isoformat(),
         "week_end": (week_start + timedelta(days=6)).isoformat(),
-        "latest_end_by_wsid": latest_end_map,
+        "latest_end_by_wsid": latest_end_by_wsid,
+        "latest_end_of_day": latest_end_by_day,
         "summary": {
             "total_employees": len(emps),
             "total_demands": total_req,
@@ -1718,10 +1870,18 @@ def generate_flexible(week_start: date):
         k = d.isoformat(); res["schedule"][k] = []
         for emp, dm in sorted(sched.get(d, []), key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
             day_key = d.isoformat()
-            latest_for_day = latest_end_map.get(day_key, {})
-            latest_end_min = latest_for_day.get(str(dm.wsid)) if dm.wsid is not None else None
+            latest_end_min = latest_end_by_day.get(day_key)
             cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
 
+            # Etiqueta según CA3: hora fija si aplica, sino C/BT global por día
+            end_label = None
+            # [PATCH] Si el día está usershift_enforced para este empleado, mostramos hora exacta
+            enforced_us = (emp.id, d) not in overrides
+
+            if dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
+                end_label = dm.shift_type['end_time'].strftime('%H:%M')
+
+            
             res["schedule"][k].append({
                 "employee_id": str(emp.id),
                 "employee_name": emp.name,
@@ -1730,9 +1890,11 @@ def generate_flexible(week_start: date):
                 "start_time": (dm.start.strftime("%H:%M") if dm.start else None),
                 "end_time": (dm.end.strftime("%H:%M") if dm.end else None),
                 "observation": ("VAC" if dm.wsid is None and emp.abs_reason.get(d) == "VAC"
-                    else "ABS" if dm.wsid is None
-                    else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT"))
+                                else "ABS" if dm.wsid is None
+                                else (end_label if end_label is not None
+                                      else ("C" if (latest_end_min is not None and cur_end_min == latest_end_min) else "BT")))
             })
+    
     return res, sched, emps, week, set()
 
 # ───────── Coalesce para guardar ─────────
