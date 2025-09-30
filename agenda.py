@@ -2099,7 +2099,7 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 # 2) trozo suelto
                 ss = _t2m(dm.start)
                 ee = _t2m(dm.end if dm.end != time(0, 0) else time(23, 59))
-
+                
                 if has_overlap(used_any[emp.id][day], ss, ee):
                     continue
 
@@ -2299,10 +2299,10 @@ def _filter_blocks_min4_and_gap_global(assigns_day_pairs, overrides,
         strong_blocks = []
         if ok_gaps:
             strong_blocks = [(s, e) for (s, e) in merged if (e - s) >= min_block]
-            if not strong_blocks and not free_mode:
-                # fuera de libre, conserva el bloque más largo si ninguno llega a 3h
-                if merged:
-                    strong_blocks = [max(merged, key=lambda ab: (ab[1]-ab[0]))]
+            # En días enforzados: si ningún bloque llega al mínimo, no dejamos nada
+            if not strong_blocks:
+                continue
+
         else:
             # si hay gap corto, quedarse con el bloque más largo
             if merged:
@@ -2498,8 +2498,11 @@ def generate(week_start: date):
     for emp in emps:
         for d in emp.absent:
             if week_start <= d <= week[-1]:
-                pseudo_dm = type("Pseudo", (), {"id": uid(), "wsid": None, "wsname": "AUSENCIA",
-                                                "start": time(0,0), "end": time(0,0), "date": d})()
+                pseudo_dm = type("Pseudo", (), {
+                    "id": uid(), "wsid": None, "wsname": "AUSENCIA",
+                    "start": time(0,0), "end": time(0,0), "date": d,
+                    "shift_type": None,  # ← para evitar atributos faltantes
+                })()
                 sched[d].append((emp, pseudo_dm))
 
     usershift_assignment_report, usershift_windows_report = build_usershift_reports(emps, week, usershift_plan, sched)
@@ -2550,8 +2553,9 @@ def generate(week_start: date):
             enforced_us = (emp.id, d) not in overrides  # día con UserShift enforzado
 
             # Hora exacta si ShiftType tiene fin fijo
-            if dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
-                end_label = dm.shift_type['end_time'].strftime('%H:%M')            
+            st = getattr(dm, 'shift_type', None)
+            if st and st.get('end_time') and st['end_time'] != time(0,0):
+                end_label = st['end_time'].strftime('%H:%M')            
             ws_latest_map = res.get("latest_end_by_wsid", {}).get(day_key, {})
             ws_latest_end_min = ws_latest_map.get(str(dm.wsid)) if dm.wsid is not None else None
             cur_end_min = _t2m(dm.end if dm.end != time(0,0) else time(23,59))
@@ -2567,8 +2571,8 @@ def generate(week_start: date):
                 if enforced_us and ws_latest_end_min is not None and cur_end_min == ws_latest_end_min:
                     obs = ""
                 # Si tiene hora fija por ShiftType
-                elif dm.shift_type and (dm.shift_type.get('end_time') and dm.shift_type['end_time'] != time(0,0)):
-                    obs = dm.shift_type['end_time'].strftime('%H:%M')
+                elif st and st.get('end_time') and st['end_time'] != time(0,0):
+                    obs = st['end_time'].strftime('%H:%M')
                 # Caso normal: C si termina al final del día, BT en otros casos
                 else:
                     obs = "C" if (ws_latest_end_min is not None and cur_end_min == ws_latest_end_min) else "BT"
@@ -2606,8 +2610,11 @@ def generate_flexible(week_start: date):
     for emp in emps:
         for d in emp.absent:
             if week_start <= d <= week[-1]:
-                pseudo_dm = type("Pseudo", (), {"id": uid(), "wsid": None, "wsname": "AUSENCIA",
-                                                "start": time(0,0), "end": time(0,0), "date": d})()
+                pseudo_dm = type("Pseudo", (), {
+                    "id": uid(), "wsid": None, "wsname": "AUSENCIA",
+                    "start": time(0,0), "end": time(0,0), "date": d,
+                    "shift_type": None,  # ← para evitar atributos faltantes
+                })()
                 sched[d].append((emp, pseudo_dm))
 
     usershift_assignment_report, usershift_windows_report = build_usershift_reports(emps, week, usershift_plan, sched)
