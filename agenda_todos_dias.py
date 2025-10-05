@@ -684,7 +684,10 @@ def _usershift_day_eligibility(emp: Emp, ddate: date) -> tuple:
         gap = b[0] - a[1]
         if gap >= MIN_HOURS_BETWEEN_SPLIT * 60:
             return True, "split", "ok"
-        return False, None, "usershift_split_gap_lt_min"
+        # ── NUEVO: si el gap es menor que 3h, tratar el día como "single"
+        #           (el colapso principal ya se hace al cargar; esto evita caer a free_mode si algo filtró).
+        return True, "single", "gap_lt_min_as_single"
+
 
     return False, None, "usershift_structure_unsupported"
 
@@ -1113,6 +1116,31 @@ def load_data(week_start: date):
                     b1e_eff = _cap_end(b1s, b1e or time(23,59))
                 if b2s:
                     b2e_eff = _cap_end(b2s, b2e or time(23,59))
+                        # ── NUEVO: si hay dos inicios y la DIFERENCIA ENTRE INICIOS es < 3h,
+            #           colapsar a un solo bloque: conservar SOLO el más temprano.
+            if b1s and b2s:
+                starts_gap = _t2m(b2s) - _t2m(b1s)
+                if 0 < starts_gap < MIN_SHIFT_DURATION_HOURS * 60:  # (< 3h)
+                    early = b1s if _t2m(b1s) <= _t2m(b2s) else b2s
+                    # Desde el más temprano: 3h fijas (como en el caso de 2 inicios)
+                    b1s = early
+                    b1e_eff = _cap_end(early, _plus_minutes(early, MIN_SHIFT_DURATION_HOURS * 60))
+                    # Anular el segundo bloque para que NO exista split en este día
+                    b2s = None
+                    b2e_eff = None
+
+                        # ── NUEVO: si hay dos inicios y la DIFERENCIA ENTRE INICIOS es < 3h,
+            #           colapsar a un solo bloque: conservar SOLO el más temprano.
+            if b1s and b2s:
+                starts_gap = _t2m(b2s) - _t2m(b1s)
+                if 0 < starts_gap < MIN_SHIFT_DURATION_HOURS * 60:  # (< 3h)
+                    early = b1s if _t2m(b1s) <= _t2m(b2s) else b2s
+                    # Desde el más temprano: 3h fijas (como en el caso de 2 inicios)
+                    b1s = early
+                    b1e_eff = _cap_end(early, _plus_minutes(early, MIN_SHIFT_DURATION_HOURS * 60))
+                    # Anular el segundo bloque para que NO exista split en este día
+                    b2s = None
+                    b2e_eff = None
 
             # Evitar solape si existen ambas ventanas
             if b1s and b2s and b1e_eff and (_t2m(b1e_eff) > _t2m(b2s)):
@@ -1123,6 +1151,11 @@ def load_data(week_start: date):
                 emp.user_shift_windows[day].append((b1s, b1e_eff))
             if b2s and b2e_eff and b2s < b2e_eff:
                 emp.user_shift_windows[day].append((b2s, b2e_eff))
+            if len(emp.user_shift_windows.get(day, [])) >= 2:
+                wins = sorted(emp.user_shift_windows[day], key=lambda w: (_t2m(w[0]), _t2m(w[1])))
+                s0 = _t2m(wins[0][0]); s1 = _t2m(wins[1][0])
+                if 0 < (s1 - s0) < MIN_SHIFT_DURATION_HOURS * 60:
+                    emp.user_shift_windows[day] = [wins[0]]           
 
             # ShiftTypes compatibles con cualquiera de las dos ventanas
             for st in shift_types:
