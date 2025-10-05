@@ -43,6 +43,9 @@ WEIGHT_SHORT_SLOT    = 100_000
 WEIGHT_CONSOLIDATE   = 250
 WEIGHT_USERWINDOW    = 80_000
 WEIGHT_FAIR_FREE = 5 
+# Prefiere arrancar el UserShift en el primer segmento disponible del día (suave)
+WEIGHT_US_ANCHOR_START = 2000
+
 
 WEIGHT_DAYS_OFF = 80_000 # penalización por incumplir "máx 2 días sin trabajar"
 CRITICAL_WS_NAMES    = {"APERTURA", "JEFE BARRA", "Jefe Barra", "Apertura"}
@@ -96,6 +99,10 @@ class Emp:
         self.shift_type_restrictions = set()
         self.shift_type_restr_by_dow = defaultdict(set)  # dow -> {shiftTypeId}
         self.shift_type_windows = defaultdict(list)      # dow -> [(start,end)] derivadas del ST
+        self.us_two_starts_dow: Set[int] = set()
+        self.user_shift_anchor_by_date = {}   # date -> time (primer inicio viable dentro de la ventana)
+
+
 
     def can(self, ws): return ws in self.roles
     def off(self, d: date) -> bool: return d.weekday() in self.day_off
@@ -122,6 +129,48 @@ class Demand:
         self.shift_type = None
 
 # ───────── HELPERS ─────────
+def _end_for_calc(t: time) -> time:
+    # tratamos 00:00 como 23:59 (fin de día)
+    return t if t != time(0,0) else time(23,59)
+
+def _intersect_minutes(a_s: time, a_e: time, b_s: time, b_e: time) -> int:
+    a1 = _t2m(a_s); a2 = _t2m(_end_for_calc(a_e))
+    b1 = _t2m(b_s); b2 = _t2m(_end_for_calc(b_e))
+    lo = max(a1, b1); hi = min(a2, b2)
+    return max(0, hi - lo)
+
+def _has_at_least_3h_inside_st_within_us(e: 'Emp', dow: int) -> bool:
+    """
+    ¿Existe alguna intersección US∩ST con >= 3h seguidas?
+    Si sí, entonces NO es 'caso Félix'. Si no, SÍ es 'caso Félix'.
+    """
+    us_wins = e.user_shift_windows.get(dow, [])
+    st_wins = e.shift_type_windows.get(dow, [])
+    if not us_wins:
+        return True  # no es día con US → no lo tratamos como conflicto ST
+    if not st_wins:
+        return False  # sin ST → consideramos conflicto (caso Félix)
+
+    min_need = MIN_SHIFT_DURATION_HOURS * 60
+    best = 0
+    for (us_s, us_e) in us_wins:
+        for (st_s, st_e) in st_wins:
+            best = max(best, _intersect_minutes(us_s, us_e, st_s, st_e))
+            if best >= min_need:
+                return True
+    return False
+
+def _is_felix_like_day(e: 'Emp', day: date, overrides: set[tuple[str, date]]) -> bool:
+    """
+    'Caso Félix' = (i) ese día tiene ≥2 ventanas de US y (ii) ST no cubre ni 3h seguidas dentro de US.
+    Además, solo aplica cuando NO es override (porque en override ya vamos en libre).
+    """
+    if (e.id, day) in overrides:
+        return False
+    dow = day.weekday()
+    if len(e.user_shift_windows.get(dow, [])) < 2:
+        return False
+    return not _has_at_least_3h_inside_st_within_us(e, dow)
 
 
 
@@ -188,7 +237,7 @@ def squash_micro_segments(demands, min_min=MIN_SEGMENT_MINUTES):
     Fusiona con el vecino contiguo los segmentos < min_min.
     Si no hay vecino contiguo, los descarta (log).
     """
-    from collections import defaultdict
+   
     by_key = defaultdict(list)
     for d in demands:
         by_key[(d.date, d.wsid, d.wsname)].append(d)
@@ -280,7 +329,7 @@ def build_free_mode_balance_days_L1_penalty(mdl, emps, dem, X, overrides_emp_day
     usando L1: sum_e |D_e - M|, donde D_e es # de días libres trabajados y M es un centro elegido por el modelo.
     Es más potente que usar sólo 'spread = max - min'.
     """
-    from collections import defaultdict
+   
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
@@ -327,13 +376,22 @@ def build_shifttype_window_penalty(mdl, emps, dem, X, overrides=set()):
             key = (e.id, d.id)
             if key not in X:
                 continue
-            # Día con US enforzado tiene prioridad absoluta → no penalizamos por ST
+
+            # Día con US enforzado → ST no penaliza (ya estaba)
             us_enforced = (e.user_shift_windows.get(dow) and (e.id, d.date) not in overrides)
+            # ── NUEVO: si es 'caso Félix' este día, ignoramos ST
+            if _is_felix_like_day(e, d.date, overrides):
+                if ASCII_LOGS:
+                    print(f"[ST-BYPASS][{d.date}] {e.name}: dos US-starts y ST no cubre 3h → no penalizamos ST.")
+                continue
+
             if us_enforced:
                 continue
+
             st_wins = e.shift_type_windows.get(dow, [])
             if not st_wins:
                 continue
+
             end = d.end if d.end != time(0,0) else time(23,59)
             in_any = any(d.start >= ws and end <= we for (ws, we) in st_wins)
             if not in_any:
@@ -341,6 +399,10 @@ def build_shifttype_window_penalty(mdl, emps, dem, X, overrides=set()):
                 mdl.Add(z >= X[key])
                 penalties.append(z)
     return (WEIGHT_USERWINDOW * sum(penalties)) if penalties else 0
+
+
+
+
 def add_shifttype_must_cover_if_possible(mdl, emps, dem, X, overrides):
     by_date = defaultdict(list)
     for d in dem:
@@ -349,15 +411,21 @@ def add_shifttype_must_cover_if_possible(mdl, emps, dem, X, overrides):
     for e in emps:
         for day, day_dems in sorted(by_date.items(), key=lambda kv: kv[0]):
             dow = day.weekday()
+
+            # ── NUEVO: si es 'caso Félix' este día, no exigimos cubrir ST
+            if _is_felix_like_day(e, day, overrides):
+                if ASCII_LOGS:
+                    print(f"[ST-MUST-BYPASS][{day}] {e.name}: dos US-starts y ST no cubre 3h → no forzamos cubrir ST.")
+                continue
+
             st_wins = e.shift_type_windows.get(dow, [])
             if not st_wins:
                 continue
 
-            # US enforzado manda; si existe, no forzamos ST aquí
+            # US enforzado manda; si existe, no forzamos ST aquí (ya estaba)
             if e.user_shift_windows.get(dow) and (e.id, day) not in overrides:
                 continue
 
-            # ¿Hay al menos 3h de demanda dentro de alguna ventana ST?
             mins_inside = 0
             inside_vars = []
             for dm in day_dems:
@@ -419,7 +487,7 @@ def build_latest_end_map_from_demands(demands):
     Devuelve: { date_iso -> { wsid_str -> end_min } }, donde end_min está en minutos.
     Si una demanda termina a 00:00, se interpreta como 23:59 (1439).
     """
-    from collections import defaultdict
+    
     latest = defaultdict(dict)
     for dm in demands:
         if dm.wsid is None:
@@ -964,12 +1032,11 @@ def load_data(week_start: date):
                 if p2: blocked.append(p2)
                 if not blocked:
                     p = _pair(f1, t1)
-                    if p: blocked.append(p)
+                if p: blocked.append(p)  # This should align with "if not blocked:" above
                 for w in _complement_blocks(blocked):
                     emp.window[dow].append(w)
-                continue
-
-        # 4) Excepciones, ausencias
+                continue        
+            # 4) Excepciones, ausencias
         for uid4, d_exc, rt, f, t in fetchall(cur, '''
             SELECT "UserId","Date","RestrictionType",
                    "AvailableFrom","AvailableUntil"
@@ -1074,8 +1141,7 @@ def load_data(week_start: date):
         def _plus_minutes(t: time, minutes: int) -> time:
             m = min(_t2m(t) + minutes, 24*60 - 1)  # 23:59 hard stop
             return _m2t(m)
-
-        for uid7, day, structure, b1s, b1e, b2s, b2e in fetchall(cur, '''
+        us_rows = fetchall(cur, '''
             SELECT "UserId","Day","Structure",
                 (TIMESTAMP '2000-01-01' + "Block1Start")::time,
                 (TIMESTAMP '2000-01-01' + "Block1lastStart")::time,
@@ -1083,7 +1149,9 @@ def load_data(week_start: date):
                 (TIMESTAMP '2000-01-01' + "Block2lastStart")::time
             FROM "Management"."UserShifts"
             ORDER BY "UserId","Day","Block1Start","Block2Start"
-        '''):
+        ''')
+        for uid7, day, structure, b1s, b1e, b2s, b2e in us_rows:
+            
             if uid7 not in emps_map:
                 continue
             emp = emps_map[uid7]
@@ -1106,6 +1174,7 @@ def load_data(week_start: date):
                 # Nunca solapar: si el fin del 1.º supera el inicio del 2.º, recortar el 1.º
                 if _t2m(b1e_eff) > _t2m(b2s):
                     b1e_eff = b2s
+                emp.us_two_starts_dow.add(day)
 
             else:
                 # Casos con un solo inicio: lógica original, cap 9h
@@ -1124,14 +1193,134 @@ def load_data(week_start: date):
             if b2s and b2e_eff and b2s < b2e_eff:
                 emp.user_shift_windows[day].append((b2s, b2e_eff))
 
-            # ShiftTypes compatibles con cualquiera de las dos ventanas
+            # ShiftTypes compatibles con alguna ventana de UserShift.
+            # Nuevo criterio PRINCIPAL: el shift type cae DENTRO de la ventana (ventana contiene al shift).
+            # Mantenemos también el criterio LEGACY (shift contiene a la ventana) por compatibilidad.
             for st in shift_types:
                 ss = _t2m(st['start_time'])
                 se = _t2m(st['end_time']) if st['end_time'] != time(0,0) else 24*60
-                def fits(a, b): return ss <= _t2m(a) and _t2m(b) <= se
-                if ((b1s and b1e_eff and fits(b1s, b1e_eff)) or
-                    (b2s and b2e_eff and fits(b2s, b2e_eff))):
+
+                def st_inside_window(a: time, b: time) -> bool:
+                    # ventana [a,b] contiene al shift type [ss,se]
+                    return _t2m(a) <= ss and se <= _t2m(b)
+
+                def window_inside_st(a: time, b: time) -> bool:
+                    # comportamiento legacy (por si tienes ventanas muy pequeñas)
+                    return ss <= _t2m(a) and _t2m(b) <= se
+
+                ok = False
+                if b1s and b1e_eff:
+                    ok = ok or st_inside_window(b1s, b1e_eff) or window_inside_st(b1s, b1e_eff)
+                if b2s and b2e_eff:
+                    ok = ok or st_inside_window(b2s, b2e_eff) or window_inside_st(b2s, b2e_eff)
+
+                if ok:
                     emp.user_shifts[day].add(st['id'])
+            # ─────────────────────────────────────────────────────────
+            # ⬇️ AQUI MISMO pega el parche (ANTES del "DEBUG: UserShifts de Javier")
+            # ─────────────────────────────────────────────────────────
+            if not hasattr(emp, "usershift_flex_days"):
+                
+                emp.usershift_flex_days = defaultdict(bool)
+
+            def _win_contains(a: time, b: time, win: tuple[time, time]) -> bool:
+                ss = _t2m(a)
+                ee = _t2m(b if b != time(0,0) else time(23,59))
+                ws = _t2m(win[0])
+                we = _t2m(win[1] if win[1] != time(0,0) else time(23,59))
+                return ws <= ss and ee <= we
+
+            def _in_any_window(a: time, b: time, wins: list[tuple[time, time]]) -> bool:
+                return any(_win_contains(a, b, w) for w in wins)
+
+            has_windows = bool(emp.user_shift_windows.get(day))
+            has_stypes  = bool(emp.user_shifts.get(day))
+            emp.usershift_flex_days[day] = bool(has_windows and not has_stypes)
+
+            if ASCII_LOGS:
+                if emp.usershift_flex_days[day]:
+                    print(f"[USERSHIFT-FLEX] {emp.name} ({emp.id}) día={day}: "
+                        f"{len(emp.user_shift_windows[day])} ventana(s), 0 shiftTypes compatibles -> bypass de ShiftTypes.")
+                    for idx, (ws_, we_) in enumerate(emp.user_shift_windows[day], 1):
+                        print(f"   - ventana {idx}: {ws_}–{we_}")
+                else:
+                    # Info útil para entender por qué NO entra en flex
+                    print(f"[USERSHIFT] {emp.name} día={day}: wins={len(emp.user_shift_windows.get(day,[]))} "
+                        f"stypes={len(emp.user_shifts.get(day,set()))} -> lógica normal.")
+                    
+            
+        # 6.b) Ancla de inicio por día (con logs de diagnóstico)
+        # Para cada empleado y día de la semana, detecta el PRIMER inicio real de demanda
+        # dentro de sus ventanas US. Esto no obliga; se usa luego como preferencia suave.
+        for e in emps:
+            e.user_shift_anchor_by_date = {}
+            for ddate in week:
+                dow = ddate.weekday()
+                wins = e.user_shift_windows.get(dow, [])
+                if not wins:
+                    if ASCII_LOGS:
+                        print(f"[ANCHOR] {e.name} {ddate} → sin ventanas US; no hay ancla.")
+                    continue
+
+                earliest_min = None
+                earliest_dm  = None
+                for dm in demands:
+                    if dm.date != ddate:
+                        continue
+                    if not e.can(dm.wsid):
+                        continue
+                    dm_end = dm.end if dm.end != time(0,0) else time(23,59)
+                    # ¿Cae dentro de alguna ventana?
+                    inside = any(dm.start >= ws and dm_end <= (we if we != time(0,0) else time(23,59))
+                                 for (ws, we) in wins)
+                    if not inside:
+                        continue
+                    st_min = _t2m(dm.start)
+                    if earliest_min is None or st_min < earliest_min:
+                        earliest_min = st_min
+                        earliest_dm  = dm
+
+                if earliest_min is not None:
+                    e.user_shift_anchor_by_date[ddate] = _m2t(earliest_min)
+                    if ASCII_LOGS:
+                        print(f"[ANCHOR] {e.name} {ddate} → ancla {_m2t(earliest_min).strftime('%H:%M')} "
+                              f"(ws='{earliest_dm.wsname}', seg={earliest_dm.start.strftime('%H:%M')}-{earliest_dm.end.strftime('%H:%M')})")
+                else:
+                    if ASCII_LOGS:
+                        print(f"[ANCHOR] {e.name} {ddate} → con ventanas US, pero "
+                              f"sin demandas dentro de ventana (roles/horarios).")
+
+        # DEBUG específico para Félix: ver ventanas y shift types habilitados por día
+        if ASCII_LOGS:
+            felix_id = "2e1c161c-c3ef-4e9a-80d0-b2a286120178"
+            if felix_id in emps_map:
+                dayname = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom']
+                fx = emps_map[felix_id]
+                print("\n=== DEBUG USERSHIFT (FELIX) ===")
+                for dow in range(7):
+                    wins = sorted(fx.user_shift_windows.get(dow, []))
+                    st_ids = sorted(list(fx.user_shifts.get(dow, set())))
+
+                    # Mostrar shift types legibles
+                    st_readable = []
+                    if st_ids:
+                        ids_set = set(st_ids)
+                        for st in shift_types:
+                            if st['id'] in ids_set:
+                                st_readable.append(f"{st['start_time']}-{st['end_time']} (id={st['id'][:6]})")
+
+                    if not wins:
+                        print(f"{dayname[dow]}: sin ventanas de UserShift => no elegible")
+                        continue
+
+                    if not st_ids:
+                        # Razón más común: la ventana es grande y ningún shift type cae dentro
+                        print(f"{dayname[dow]}: ventanas={wins} pero 0 shift types habilitados.")
+                        print("  Posible causa: ningún ShiftType cae COMPLETO dentro de las ventanas.")
+                        print("  Revisa tamaños de las ventanas y la tabla ShiftTypes.")
+                    else:
+                        print(f"{dayname[dow]}: ventanas={wins} | shift types habilitados: {', '.join(st_readable)}")
+ 
 
         # DEBUG: UserShifts de Javier
         if ASCII_LOGS:
@@ -1438,25 +1627,133 @@ def build_consolidation_cost(mdl, emps, dem, X):
             y_vars.append(y)
     return sum(y_vars) if y_vars else 0
 
+def build_usershift_anchor_start_preference(mdl, emps, dem, X, overrides: set[tuple[str, date]]):
+    """
+    Preferencia suave: si el día NO está en override y existe 'ancla' (primer inicio)
+    para (empleado, día), intenta que ese empleado cubra ALGÚN segmento cuyo start sea
+    exactamente ese primer inicio detectado.
+    Además, imprime logs para explicar CUANDO es posible anclar y POR QUÉ no lo es.
+    """
+    
+    by_day = defaultdict(list)
+    for d in dem:
+        by_day[d.date].append(d)
+
+    def _why_no_X_for_anchor(e, dm, free_today: bool) -> str | None:
+        """
+        Replica la lógica de creación de variables (versión flexible) para explicar
+        por qué NO hay X en el segmento ancla. Devuelve None si 'sí podría' crear X.
+        """
+        dow = dm.date.weekday()
+        end = dm.end if dm.end != time(0,0) else time(23,59)
+
+        if not e.can(dm.wsid):
+            return "rol_no_habilitado"
+
+        # Si hay US enforzado (no override), el segmento debe caer dentro de US
+        if e.user_shift_windows.get(dow) and not free_today:
+            in_us = any(dm.start >= ws and end <= (we if we != time(0,0) else time(23,59))
+                        for (ws, we) in sorted(e.user_shift_windows[dow], key=lambda w: (_t2m(w[0]), _t2m(w[1]))))
+            if not in_us:
+                return "fuera_de_ventana_usershift"
+
+        else:
+            # Sin US enforzado: si hay ST ese día, debe caer en ventana ST
+            st_wins = e.shift_type_windows.get(dow, [])
+            
+            if st_wins:
+                in_st = any(dm.start >= ws and end <= we for (ws, we) in st_wins)
+                if not in_st:
+                    return "fuera_de_ventana_shifttype"
+            # En override (free) respetamos disponibilidad general
+            if free_today and not e.available(dm.date, dm.start, dm.end):
+                return "fuera_de_disponibilidad_general"
+
+        # Si llega aquí, SÍ podríamos crear X
+        return None
+
+    terms = []
+    for e in emps:
+        anchors = getattr(e, 'user_shift_anchor_by_date', {})
+        for day, day_dems in sorted(by_day.items(), key=lambda kv: kv[0]):
+            free_today = (e.id, day) in overrides
+
+            # Si es override, no empujamos ancla (pero logeamos por qué se omite)
+            if free_today:
+                if ASCII_LOGS:
+                    print(f"[ANCHOR] {e.name} {day} → omitido (override/free_mode).")
+                continue
+
+            anchor_t = anchors.get(day)
+            if not anchor_t:
+                if ASCII_LOGS:
+                    print(f"[ANCHOR] {e.name} {day} → sin ancla (no había segmento dentro de US).")
+                continue
+
+            anchor_min = _t2m(anchor_t)
+            # Todos los segmentos del día que empiezan EXACTO en el ancla (independiente de X)
+            anchored_segments = [dm for dm in day_dems if _t2m(dm.start) == anchor_min]
+
+            # De esos, ¿cuáles tienen X creada?
+            earliest_set = [dm for dm in anchored_segments if (e.id, dm.id) in X]
+
+            if earliest_set:
+                if ASCII_LOGS:
+                    ws_list = ", ".join(f"{dm.wsname}" for dm in earliest_set[:5])
+                    print(f"[ANCHOR] {e.name} {day} → ancla {anchor_t.strftime('%H:%M')} "
+                          f"VIABLE: {len(earliest_set)} opciones (ej: {ws_list}).")
+                y = mdl.NewBoolVar(f"y_anchor_{e.id}_{day.isoformat()}")
+                mdl.Add(sum(X[e.id, dm.id] for dm in earliest_set) >= y)
+                mdl.Add(sum(X[e.id, dm.id] for dm in earliest_set) <= 1000 * y)
+                terms.append(1 - y)
+            else:
+                # No hay X en la ancla: busca la PRIMERA razón y logéala
+                reason = "sin_variables_X"  # fallback
+                for dm in anchored_segments:
+                    r = _why_no_X_for_anchor(e, dm, free_today)
+                    if r:
+                        reason = r
+                        break
+                if ASCII_LOGS:
+                    print(f"[ANCHOR] {e.name} {day} → ancla {anchor_t.strftime('%H:%M')} "
+                          f"NO viable ({reason}).")
+    return sum(terms) if terms else 0
+
+
+
 def build_usershift_window_penalty(mdl, emps, dem, X, overrides=set()):
     penalties = []
     for d in dem:
+        dow = d.date.weekday()
         for e in emps:
             key = (e.id, d.id)
             if key not in X:
                 continue
-            if e.user_shift_windows.get(d.date.weekday(), []) and (e.id, d.date) not in overrides:
-                end = d.end if d.end != time(0,0) else time(23,59)
-                in_any = False
-                for ws, we in e.user_shift_windows[d.date.weekday()]:
-                    w_end = we if we != time(0,0) else time(23,59)
-                    if d.start >= ws and end <= w_end:
-                        in_any = True
-                        break
-                if not in_any:
-                    z = mdl.NewBoolVar(f"pen_outside_us_{e.id}_{d.id}")
-                    mdl.Add(z >= X[key])
-                    penalties.append(z)
+
+            # ¿Hay US hoy?
+            has_us = bool(e.user_shift_windows.get(dow, []))
+            if not has_us:
+                continue
+
+            end = d.end if d.end != time(0,0) else time(23,59)
+            in_any = any(d.start >= ws and end <= (we if we != time(0,0) else time(23,59))
+                         for (ws, we) in e.user_shift_windows.get(dow, []))
+
+            # Regla original: con US enforzado (no override) se penaliza si sale
+            us_enforced = has_us and ((e.id, d.date) not in overrides)
+
+            # --- NUEVO: si ese DOW tiene DOS starts, penalizamos fuera de US SIEMPRE ---
+            two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))
+            penalize_today = us_enforced or two_starts_today
+
+            if penalize_today and not in_any:
+                z = mdl.NewBoolVar(f"pen_outside_us_{e.id}_{d.id}")
+                mdl.Add(z >= X[key])
+                penalties.append(z)
+
+                if ASCII_LOGS and two_starts_today:
+                    print(f"[US-PENALTY-2STARTS] {e.name} {d.date.isoformat()} fuera de US → penalizado (dos Block1Start)")
+
     return (WEIGHT_USERWINDOW * sum(penalties)) if penalties else 0
 
 def build_free_mode_balance_penalty(mdl, emps, dem, X, overrides: Set[Tuple[str, date]]):
@@ -1875,6 +2172,7 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
             return (0 if us_enf else (1 if st_day else 2), len(e.roles), e.name)
 
         for e in sorted(emps, key=prio):
+            two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))
             if not e.can(d.wsid):
                 continue
             free_today = (e.id, d.date) in overrides
@@ -1887,15 +2185,43 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
                 if not in_us:
                     continue
             else:
-                # Sin US enforzado: si hay ST para ese día, el segmento debe caer en una ventana ST
+                # Sin US enforzado: primero intentamos con ShiftTypes
                 st_wins = e.shift_type_windows.get(dow, [])
-                if st_wins:
-                    end = d.end if d.end != time(0,0) else time(23,59)
-                    if not any(d.start >= ws and end <= we for (ws, we) in st_wins):
-                        continue
-                # y en modo libre sí respetamos disponibilidad general
+                end_seg = d.end if d.end != time(0,0) else time(23,59)
+                in_st = any(d.start >= ws and end_seg <= we for (ws, we) in st_wins) if st_wins else False
+
+                if not in_st:
+                    # === BYPASS estilo "Félix" SOLO si el día fue marcado flex en Bloque 6
+                    flex_day = getattr(e, "usershift_flex_days", {}).get(d.date, False)
+                    if flex_day:
+                        us_wins = e.user_shift_windows.get(dow, [])
+                        in_us = any(d.start >= ws and end_seg <= (we if we != time(0,0) else time(23,59))
+                                    for (ws, we) in us_wins)
+                        if in_us:
+                            if ASCII_LOGS:
+                                print(f"[USERSHIFT-FLEX] habilitado X[{e.name},{d.id}] "
+                                    f"{d.start.strftime('%H:%M')}-{end_seg.strftime('%H:%M')} "
+                                    f"wsid={d.wsid} dentro de ventana UserShift SIN exigir ShiftType.")
+                            # (seguimos abajo a chequeo de disponibilidad si es override)
+                        else:
+                            # No cabe en ninguna ventana US: no aplicamos bypass → seguimos como antes
+                            if ASCII_LOGS:
+                                print(f"[USERSHIFT-FLEX][SKIP] {e.name} {d.date} "
+                                    f"{d.start.strftime('%H:%M')}-{end_seg.strftime('%H:%M')} "
+                                    f"fuera de ventanas UserShift; requiere ST y no calza.")
+                            continue
+                    else:
+                        # Día NO flex: se mantiene la regla original (exigir ST si existen)
+                        if st_wins:
+                            continue
+                        # Si no hay st_wins definidos, seguimos abajo al chequeo de disponibilidad
+
+                # En modo libre (override) siempre respetamos disponibilidad general
                 if free_today and not e.available(d.date, d.start, d.end):
                     continue
+
+                if ASCII_LOGS and two_starts_today and st_wins:
+                    print(f"[ST-BYPASS-2STARTS] {e.name} {d.date.isoformat()} DOW={dow} → no se exige ventana de ShiftType (dos Block1Start)")
 
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
 
@@ -1988,6 +2314,7 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date],
     usershift_penalty  = build_usershift_window_penalty(mdl, emps, dem, X, overrides_emp_day)
     penalty_days_off, meta_days_off = add_max_two_days_off_soft(mdl, emps, dem, X)
     fair_free_penalty = build_free_mode_balance_penalty(mdl, emps, dem, X, overrides_emp_day)
+    anchor_pref_penalty = build_usershift_anchor_start_preference(mdl, emps, dem, X, overrides_emp_day)
 
     mdl.Minimize(
         sum(group_penalties) * WEIGHT_MUST_HAVE_ONE
@@ -1995,6 +2322,7 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date],
         + usershift_penalty
         + WEIGHT_DAYS_OFF * penalty_days_off
         + WEIGHT_FAIR_FREE * fair_free_penalty
+        + WEIGHT_US_ANCHOR_START * anchor_pref_penalty   # ← NUEVO
     )
 
     # Resolver
@@ -2137,6 +2465,7 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
     fair_free_penalty = build_free_mode_balance_penalty(mdl, emps_subset, dem, X, overrides)
     fair_free_days_penalty = build_free_mode_balance_days_penalty(mdl, emps_subset, dem, X, overrides)
     fair_free_days_L1 = build_free_mode_balance_days_L1_penalty(mdl, emps_subset, dem, X, overrides)
+    anchor_pref_penalty = build_usershift_anchor_start_preference(mdl, emps_subset, dem, X, overrides)
 
 
 
@@ -2148,10 +2477,11 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
         + shifttype_penalty
         + WEIGHT_SPECIALIST_FREE * specialist_penalty
         + WEIGHT_FAIR_FREE * fair_free_penalty
-        + WEIGHT_FAIR_FREE_DAYS * fair_free_days_penalty   # 👈 NUEVO
+        + WEIGHT_FAIR_FREE_DAYS * fair_free_days_penalty
         + WEIGHT_FAIR_FREE_DAYS_L1 * fair_free_days_L1
-
+        + WEIGHT_US_ANCHOR_START * anchor_pref_penalty   # ← NUEVO
     )
+
     # ---------- Resolver ----------
     sol = cp_model.CpSolver()
     sol.parameters.random_seed = 0
@@ -2587,7 +2917,6 @@ def _merge_sorted(intervals):
 
 
 def _filter_free_mode_total_and_gaps(assigns_day_pairs, overrides, min_total_hours: int, gap_hours: int):
-    from collections import defaultdict
     by_emp = defaultdict(list)
     for emp, dm in assigns_day_pairs:
         s = _t2m(dm.start)
