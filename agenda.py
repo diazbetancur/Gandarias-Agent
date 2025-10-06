@@ -44,7 +44,7 @@ WEIGHT_CONSOLIDATE   = 250
 WEIGHT_USERWINDOW    = 80_000
 WEIGHT_FAIR_FREE = 5 
 # Prefiere arrancar el UserShift en el primer segmento disponible del día (suave)
-WEIGHT_US_ANCHOR_START = 2000
+WEIGHT_US_ANCHOR_START = 80_000
 
 
 WEIGHT_DAYS_OFF = 80_000 # penalización por incumplir "máx 2 días sin trabajar"
@@ -1247,7 +1247,22 @@ def load_data(week_start: date):
                     # Info útil para entender por qué NO entra en flex
                     print(f"[USERSHIFT] {emp.name} día={day}: wins={len(emp.user_shift_windows.get(day,[]))} "
                         f"stypes={len(emp.user_shifts.get(day,set()))} -> lógica normal.")
-                    
+        # Reconstruir dos starts en filas separadas como 3h + resto (máx 6h), sin solapes
+        for emp in emps_map.values():
+            for dow, wins in list(emp.user_shift_windows.items()):
+                starts = sorted({_t2m(s) for (s, _e) in wins})
+                if len(starts) >= 2:
+                    s1, s2 = _m2t(starts[0]), _m2t(starts[1])
+
+                    def _plus_minutes(t, m): return _m2t(min(_t2m(t)+m, 24*60-1))
+
+                    e1 = min(_plus_minutes(s1, MIN_SHIFT_DURATION_HOURS*60), s2)  # 3h y sin pisar el 2º inicio
+                    late_allow = (MAX_HOURS_PER_DAY - MIN_SHIFT_DURATION_HOURS) * 60  # 6h
+                    e2 = _m2t(min(_t2m(s2)+late_allow, 24*60-1))
+
+                    emp.user_shift_windows[dow] = [(s1, e1), (s2, e2)]
+                    emp.us_two_starts_dow.add(dow)  # activa las reglas de dos inicios
+            
             
         # 6.b) Ancla de inicio por día (con logs de diagnóstico)
         # Para cada empleado y día de la semana, detecta el PRIMER inicio real de demanda
@@ -1449,6 +1464,52 @@ def add_usershift_must_cover_if_possible_with_overrides(mdl, emps, dem, X, overr
                           and (dm.end if dm.end != time(0,0) else time(23,59)) <= w_end]
                 if inside:
                     mdl.Add(sum(X[e.id, dm.id] for dm in inside) >= 1)
+
+def add_anchor_must_cover_two_starts(mdl, emps, dem, X, overrides: Set[Tuple[str, date]]):
+    """
+    Para días con dos starts (us_two_starts_dow) y NO override:
+    Si existe demanda cuyo start == inicio exacto de la ventana US, obliga a cubrir al menos
+    un segmento que arranque ahí (por cada ventana del día).
+    """
+    from collections import defaultdict
+    by_day = defaultdict(list)
+    for dm in dem:
+        by_day[dm.date].append(dm)
+
+    def tend(t: time) -> time:
+        return t if t != time(0,0) else time(23,59)
+
+    for e in emps:
+        for day, dlist in by_day.items():
+            if (e.id, day) in overrides:
+                continue  # solo en US enforzado
+            dow = day.weekday()
+            if dow not in getattr(e, "us_two_starts_dow", set()):
+                continue
+
+            wins = sorted(e.user_shift_windows.get(dow, []), key=lambda w: (_t2m(w[0]), _t2m(w[1])))
+            if not wins:
+                continue
+
+            for (w_s, w_e) in wins:
+                w_end = tend(w_e)
+                # candidatos: start EXACTO en w_s y dentro de esa ventana
+                cands = []
+                for dm in dlist:
+                    if (e.id, dm.id) not in X:
+                        continue
+                    if not e.can(dm.wsid):
+                        continue
+                    end = tend(dm.end)
+                    if dm.start == w_s and end <= w_end:
+                        cands.append(dm)
+                # Si existe al menos uno, exijo cubrirlo
+                if cands:
+                    mdl.Add(sum(X[e.id, dm.id] for dm in cands) >= 1)
+                    if ASCII_LOGS:
+                        hhmm = w_s.strftime("%H:%M")
+                        print(f"[ANCHOR-HARD-2STARTS] {e.name} {day} → debe cubrir inicio US {hhmm}")
+
 
 # ───────── Utilidades solver (estricto/flexible) ─────────
 def groups_without_usershift_candidates(
@@ -2168,22 +2229,23 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
         def prio(e):
             us_enf = (e.user_shift_windows.get(dow) and (e.id, d.date) not in overrides)
             st_day = bool(e.shift_type_windows.get(dow))
-            # 0: US enforzado, 1: tiene ST ese día, 2: resto
             return (0 if us_enf else (1 if st_day else 2), len(e.roles), e.name)
 
         for e in sorted(emps, key=prio):
-            two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))
             if not e.can(d.wsid):
                 continue
-            free_today = (e.id, d.date) in overrides
 
-            # US enforzado: debe caer dentro de alguna ventana US
+            free_today = (e.id, d.date) in overrides
+            two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))  # ← FIX NameError
+
+            # US enforzado: debe caer dentro de alguna ventana US (no exigimos ST)
             if e.user_shift_windows.get(dow) and not free_today:
                 end = d.end if d.end != time(0,0) else time(23,59)
                 in_us = any(d.start >= ws and end <= (we if we != time(0,0) else time(23,59))
                             for ws, we in sorted(e.user_shift_windows[dow], key=lambda w: (_t2m(w[0]), _t2m(w[1]))))
                 if not in_us:
                     continue
+
             else:
                 # Sin US enforzado: primero intentamos con ShiftTypes
                 st_wins = e.shift_type_windows.get(dow, [])
@@ -2191,37 +2253,22 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
                 in_st = any(d.start >= ws and end_seg <= we for (ws, we) in st_wins) if st_wins else False
 
                 if not in_st:
-                    # === BYPASS estilo "Félix" SOLO si el día fue marcado flex en Bloque 6
-                    flex_day = getattr(e, "usershift_flex_days", {}).get(d.date, False)
-                    if flex_day:
-                        us_wins = e.user_shift_windows.get(dow, [])
-                        in_us = any(d.start >= ws and end_seg <= (we if we != time(0,0) else time(23,59))
-                                    for (ws, we) in us_wins)
-                        if in_us:
-                            if ASCII_LOGS:
-                                print(f"[USERSHIFT-FLEX] habilitado X[{e.name},{d.id}] "
-                                    f"{d.start.strftime('%H:%M')}-{end_seg.strftime('%H:%M')} "
-                                    f"wsid={d.wsid} dentro de ventana UserShift SIN exigir ShiftType.")
-                            # (seguimos abajo a chequeo de disponibilidad si es override)
-                        else:
-                            # No cabe en ninguna ventana US: no aplicamos bypass → seguimos como antes
-                            if ASCII_LOGS:
-                                print(f"[USERSHIFT-FLEX][SKIP] {e.name} {d.date} "
-                                    f"{d.start.strftime('%H:%M')}-{end_seg.strftime('%H:%M')} "
-                                    f"fuera de ventanas UserShift; requiere ST y no calza.")
-                            continue
-                    else:
-                        # Día NO flex: se mantiene la regla original (exigir ST si existen)
-                        if st_wins:
-                            continue
-                        # Si no hay st_wins definidos, seguimos abajo al chequeo de disponibilidad
+                    # BYPASS en día con dos starts: si cae dentro de alguna ventana US, lo aceptamos
+                    us_wins = e.user_shift_windows.get(dow, [])
+                    in_us = any(d.start >= ws and end_seg <= (we if we != time(0,0) else time(23,59))
+                                for (ws, we) in us_wins) if us_wins else False
+                    flex_day = getattr(e, "usershift_flex_days", {}).get(dow, False)
 
-                # En modo libre (override) siempre respetamos disponibilidad general
+                    if not (flex_day or (two_starts_today and in_us)):
+                        continue
+
+                # En override respetamos disponibilidad general
                 if free_today and not e.available(d.date, d.start, d.end):
                     continue
 
                 if ASCII_LOGS and two_starts_today and st_wins:
-                    print(f"[ST-BYPASS-2STARTS] {e.name} {d.date.isoformat()} DOW={dow} → no se exige ventana de ShiftType (dos Block1Start)")
+                    print(f"[ST-BYPASS-2STARTS] {e.name} {d.date.isoformat()} DOW={dow} → "
+                          f"permitimos dentro de US aunque no haya ventana ST")
 
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
 
@@ -2434,7 +2481,7 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
     add_min_per_contiguous_block_global_enforced(mdl, emps_subset, dem, X, overrides, MIN_SHIFT_DURATION_HOURS)
     add_usershift_must_cover_if_possible_with_overrides(mdl, emps_subset, dem, X, overrides)
     add_shifttype_must_cover_if_possible(mdl, emps_subset, dem, X, overrides)
-
+    add_anchor_must_cover_two_starts(mdl, emps_subset, dem, X, overrides)
 
     # Mantener preferencia por cubrir dentro de UserShift (y obligación en inicios de ventana si procede)
     add_usershift_must_cover_if_possible_with_overrides(mdl, emps_subset, dem, X, overrides)
@@ -2553,6 +2600,81 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
         dem,
         key=lambda d: (d.date, str(d.wsid), _t2m(d.start), _t2m(d.end if d.end != time(0, 0) else time(23, 59)))
     )
+    by_day = defaultdict(list)
+    for dm in dem_sorted:
+        by_day[dm.date].append(dm)
+
+    for e in emps:
+        for day in sorted(by_day.keys()):
+            if (e.id, day) in overrides:
+                continue
+            dow = day.weekday()
+            if dow not in getattr(e, "us_two_starts_dow", set()):
+                continue
+            wins = sorted(e.user_shift_windows.get(dow, []), key=lambda w: (_t2m(w[0]), _t2m(w[1])))
+            for (w_s, w_e) in wins:
+                # busca una demanda que arranque exactamente en w_s y que e pueda cubrir
+                cand = next((dm for dm in by_day[day]
+                             if dm.start == w_s and e.can(dm.wsid) and remaining[dm.id] > 0), None)
+                if not cand:
+                    continue
+                s = _t2m(cand.start)
+                e_min = _t2m(cand.end if cand.end != time(0,0) else time(23,59))
+                if not _has_overlap(used_any[e.id][day], s, e_min):
+                    assign[day].append((e, cand))
+                    used_any[e.id][day].append((s, e_min))
+                    used_any[e.id][day].sort()
+                    # (opcional pero recomendable, coherencia con el resto del greedy)
+                    used_by_ws[e.id][day][cand.wsid] = merge_intervals(
+                        used_by_ws[e.id][day][cand.wsid] + [(s, e_min)]
+                    )
+                    days_worked[e.id].add(day)
+                    remaining[cand.id] -= 1
+                    if ASCII_LOGS:
+                        print(f"[GREEDY-SEED-2STARTS] {e.name} {day} comienza en {w_s.strftime('%H:%M')}")
+                    # tras el print("[GREEDY-SEED-2STARTS] ...")
+                    min_block = MIN_SHIFT_DURATION_HOURS * 60
+                    win_end_min = _t2m(w_e if w_e != time(0,0) else time(23,59))
+
+                    # construye el grupo de ese puesto en ese día, ordenado
+                    group = sorted(
+                        [dm2 for dm2 in by_day[day] if dm2.wsid == cand.wsid],
+                        key=lambda d: (_t2m(d.start), _t2m(d.end if d.end != time(0,0) else time(23,59)))
+                    )
+                    # índice del segmento sembrado
+                    try:
+                        start_idx = next(i for i, g in enumerate(group) if g.id == cand.id)
+                    except StopIteration:
+                        start_idx = None
+
+                    # intenta encadenar contiguamente hasta alcanzar 3h dentro de la misma ventana US
+                    if start_idx is not None:
+                        acc_start = s
+                        acc_end = e_min
+                        k = start_idx + 1
+                        while k < len(group) and (acc_end - acc_start) < min_block:
+                            nxt = group[k]
+                            if remaining[nxt.id] <= 0:
+                                k += 1; continue
+                            nxt_s = _t2m(nxt.start)
+                            nxt_e = _t2m(nxt.end if nxt.end != time(0,0) else time(23,59))
+
+                            # Debe ser contiguo, no solapar y seguir dentro de la ventana US
+                            if nxt_s == acc_end and nxt_e <= win_end_min and not _has_overlap(used_any[e.id][day], nxt_s, nxt_e):
+                                assign[day].append((e, nxt))
+                                used_any[e.id][day].append((nxt_s, nxt_e))
+                                used_any[e.id][day].sort()
+                                used_by_ws[e.id][day][nxt.wsid] = merge_intervals(
+                                    used_by_ws[e.id][day][nxt.wsid] + [(nxt_s, nxt_e)]
+                                )
+                                days_worked[e.id].add(day)
+                                remaining[nxt.id] -= 1
+                                acc_end = nxt_e
+                            else:
+                                break
+                            k += 1
+
+
     by_day_ws = defaultdict(list)
     for d in dem_sorted:
         by_day_ws[(d.date, d.wsid)].append(d)
