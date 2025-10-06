@@ -2309,6 +2309,8 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date],
             todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
             if todays:
                 mdl.Add(sum(duration_min(dm) * X[e.id, dm.id] for dm in todays) <= MAX_HOURS_PER_DAY * 60)
+    add_max_days_worked_per_week(mdl, emps, dem, X, week, max_days=MAX_DAYS_PER_WEEK)
+
 
     # (Opcional) mín. horas/semana legales
     if min_hours_required > 0:
@@ -2578,6 +2580,9 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
     used_any = defaultdict(lambda: defaultdict(list))   # emp -> date -> [(s,e)]
     used_by_ws = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))  # emp -> date -> wsid -> [(s,e)]
     days_worked = defaultdict(set)
+    def _can_take_day(emp_id: str, dday: date) -> bool:
+        # Si ya trabaja ese día, ok; si no, solo si lleva < 6 días
+        return (dday in days_worked[emp_id]) or (len(days_worked[emp_id]) < MAX_DAYS_PER_WEEK)
     def _free_days_so_far(emp_id: str) -> int:
         cnt = 0
         for dday, intervals in used_any[emp_id].items():
@@ -2616,6 +2621,9 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 # busca una demanda que arranque exactamente en w_s y que e pueda cubrir
                 cand = next((dm for dm in by_day[day]
                              if dm.start == w_s and e.can(dm.wsid) and remaining[dm.id] > 0), None)
+                if not _can_take_day(e.id, day):
+                    continue
+
                 if not cand:
                     continue
                 s = _t2m(cand.start)
@@ -2662,6 +2670,9 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                             # Debe ser contiguo, no solapar y seguir dentro de la ventana US
                             if nxt_s == acc_end and nxt_e <= win_end_min and not _has_overlap(used_any[e.id][day], nxt_s, nxt_e):
                                 assign[day].append((e, nxt))
+                                if not _can_take_day(e.id, day):
+                                    break
+
                                 used_any[e.id][day].append((nxt_s, nxt_e))
                                 used_any[e.id][day].sort()
                                 used_by_ws[e.id][day][nxt.wsid] = merge_intervals(
@@ -2766,12 +2777,14 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 emps,
                 key=lambda ee: (
                     0 if has_usershift_today(ee, day) else 1,
+                    len(days_worked[ee.id]),  # NUEVO: prioriza quien lleva menos días en la semana
                     (_free_days_so_far(ee.id) if (ee.id, day) in overrides else 10_000),
                     (_free_minutes_so_far(ee.id) if (ee.id, day) in overrides else 10_000_000),
                     len(ee.roles),
                     ee.name,
                 ),
             )
+
             
 
             for emp in emps_ordered:
@@ -2784,7 +2797,9 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                 if not enforced:
                     if not emp.available(dm.date, dm.start, dm.end):
                         continue
-
+                if not _can_take_day(emp.id, day):
+                    continue
+                       
                 # 1) intentar cadena contigua ≥ MIN_SHIFT_DURATION_HOURS
                 chain = try_build_chain(emp, group, idx)
                 if chain:
@@ -2816,6 +2831,8 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
 
                 if enforced and not _fits_usershift_enforced(emp, dm):
                     continue
+                if not _can_take_day(emp.id, day):
+                    continue
 
                 assign[day].append((emp, dm))
                 used_any[emp.id][day].append((ss, ee))
@@ -2835,6 +2852,12 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
             MIN_HOURS_BETWEEN_SPLIT
         )
         assign[day] = filtered
+    # Recalcular días realmente trabajados tras el filtrado
+    days_worked = defaultdict(set)
+    for dday, pairs in assign.items():
+        for emp, _ in pairs:
+            days_worked[emp.id].add(dday)
+
 
     # Estadísticas de cobertura
     coverage_stats = {}
