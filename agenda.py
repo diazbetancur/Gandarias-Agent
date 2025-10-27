@@ -978,16 +978,15 @@ def load_data(week_start: date):
         MIN_SHIFT_DURATION_HOURS  = int(L.get("min_shift_duration_hours")  or _fallback_min_shift)
         MIN_HOURS_BETWEEN_SHIFTS  = int(L.get("min_hours_between_shifts")  or _fallback_min_between_shifts)
 
-        # (opcional) guardar el mínimo de días libres de la semana (2 según tu tabla)
+        # De BD (2 en tu tabla)
         MIN_DAYS_OFF_PER_WEEK     = int(L.get("min_days_off_per_week")     or 2)
 
         if ASCII_LOGS:
             print(f"[LAW/UUID] MAX_HOURS_PER_DAY={MAX_HOURS_PER_DAY}h, "
-                f"MIN_SHIFT_DURATION_HOURS={MIN_SHIFT_DURATION_HOURS}h, "
-                f"MIN_HOURS_BETWEEN_SPLIT={MIN_HOURS_BETWEEN_SPLIT}h, "
-                f"MIN_HOURS_BETWEEN_SHIFTS={MIN_HOURS_BETWEEN_SHIFTS}h, "
-                f"MIN_DAYS_OFF_PER_WEEK={MIN_DAYS_OFF_PER_WEEK}")
-
+                  f"MIN_SHIFT_DURATION_HOURS={MIN_SHIFT_DURATION_HOURS}h, "
+                  f"MIN_HOURS_BETWEEN_SPLIT={MIN_HOURS_BETWEEN_SPLIT}h, "
+                  f"MIN_HOURS_BETWEEN_SHIFTS={MIN_HOURS_BETWEEN_SHIFTS}h, "
+                  f"MIN_DAYS_OFF_PER_WEEK={MIN_DAYS_OFF_PER_WEEK}")
 
         # 1) Plantilla y demandas
         tpl_id, tpl_name = pick_template(cur, week_start, week_end)
@@ -1064,6 +1063,35 @@ def load_data(week_start: date):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
         emps = [emps_map[k] for k in sorted(emps_map.keys())]
+
+        # === 2.a) AUSENTISMOS (HARD BLOCK) — PRIMERO QUE NADA ===
+        for uid_abs, sd_abs, ed_abs in fetchall(
+            cur,
+            '''
+            SELECT "UserId",
+                   "StartDate"::date,
+                   COALESCE("EndDate"::date, %s)
+            FROM "Management"."UserAbsenteeisms"
+            WHERE "StartDate"::date <= %s
+              AND COALESCE("EndDate"::date, %s) >= %s
+            ORDER BY "UserId","StartDate","EndDate"
+            ''',
+            (week_end, week_end, week_end, week_start),
+        ):
+            if uid_abs not in emps_map:
+                continue
+            emp = emps_map[uid_abs]
+            d0 = max(sd_abs, week_start)
+            while d0 <= ed_abs:
+                emp.absent.add(d0)
+                emp.abs_reason[d0] = 'ABS'
+                emp.exc[d0] = []  # no permitir excepciones ese día
+                d0 += timedelta(days=1)
+
+        if ASCII_LOGS:
+            cnt_abs = sum(1 for e in emps_map.values() if any(d in week for d in e.absent))
+            if cnt_abs:
+                print(f"[ABSENTEEISMS] Empleados con ausentismos en semana: {cnt_abs}")
 
         # Fallbacks de roles por nombre (expansión)
         name2id = {}
@@ -1149,7 +1177,7 @@ def load_data(week_start: date):
                 dow_names = ", ".join(sorted({_dow_es(d.weekday()) for d in e.rest_exempt_dates}))
                 print(f"[REST-EXEMPT] {e.name}: tiene RT=0 en semana ({dow_names}) → cuentan como libres.")
 
-        # 4) Excepciones y ausencias
+        # 4) Excepciones y licencias (ausentismos ya aplicados)
         for uid4, d_exc, rt, f, t in fetchall(
             cur,
             '''
@@ -1189,22 +1217,7 @@ def load_data(week_start: date):
                 emp.absent.add(d0); emp.abs_reason[d0] = 'VAC'
                 d0 += timedelta(days=1)
 
-        for uid6, sd, ed in fetchall(
-            cur,
-            '''
-            SELECT "UserId","StartDate"::date, COALESCE("EndDate"::date,%s)
-            FROM "Management"."UserAbsenteeisms"
-            WHERE "StartDate"::date <= %s AND COALESCE("EndDate"::date,%s) >= %s
-            ORDER BY "UserId","StartDate","EndDate"
-            ''',
-            (week_end, week_end, week_end, week_start),
-        ):
-            if uid6 not in emps_map: continue
-            emp = emps_map[uid6]
-            d0 = max(sd, week_start)
-            while d0 <= ed:
-                emp.absent.add(d0); emp.abs_reason[d0] = 'ABS'
-                d0 += timedelta(days=1)
+        # (El bloque viejo de UserAbsenteeisms se eliminó; ya se aplicó en 2.a)
 
         # 5) ShiftTypes y restricciones por ST
         shift_types = []
@@ -1431,10 +1444,15 @@ def load_data(week_start: date):
                     dn = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][dow]
                     print(f"[USERSHIFT/CASE-E-ST] {e.name} {dn}: ventanas={e.user_shift_windows.get(dow)}")
 
-        # 6.b) Ancla por día + ENFORCE US (igual)
+        # 6.b) Ancla por día + ENFORCE US (salta días con ABS)
         for e in emps:
             e.user_shift_anchor_by_date = {}
             for ddate in week:
+                if e.absent_day(ddate):
+                    if ASCII_LOGS:
+                        print(f"[ANCHOR/SKIP-ABS] {e.name} {ddate} → AUSENTE (ABS); no se evalúa ancla.")
+                    continue
+
                 dow = ddate.weekday()
                 wins = e.user_shift_windows.get(dow, [])
                 if not wins:
@@ -1469,7 +1487,7 @@ def load_data(week_start: date):
                         if ASCII_LOGS:
                             print(f"[ANCHOR] {e.name} {ddate} → ventanas (p.e. por ST) sin demanda; no se aplica US-ENFORCE.")
 
-        # 6.c) Política EXACTA de 2 libres (igual)
+        # 6.c) Política EXACTA de días libres (desde BD)
         forced_free_by_emp = {}
         for e in emps:
             rt0_dates = [d for d in week if d.weekday() in e.day_off]
@@ -1559,10 +1577,12 @@ def load_data(week_start: date):
             for e in emps if getattr(e, "rest_exempt_from_additional", False)
         },
         "forced_free_by_emp": forced_free_by_emp,
-        "policy_note": "Política L-D: exactamente 2 días libres por persona contando RT==0; si faltan, se fuerzan sin ABS/OBS."
+        "policy_note": f"Política L-D: exactamente {MIN_DAYS_OFF_PER_WEEK} días libres por persona contando RT==0; si faltan, se fuerzan sin ABS/OBS."
     }
 
     return emps, demands, tpl_name, week, rest_policy_meta, shift_types, min_hours_required
+
+
 
 def plan_usershift_day_modes(emps: List[Emp], demands: List[Demand], week: List[date]):
     overrides = set()
@@ -2406,6 +2426,12 @@ def build_variables(mdl, emps, dem, overrides_emp_day, relax_groups):
     dem_sorted = sorted(dem, key=lambda d: (d.date, _t2m(d.start), _t2m(d.end), str(d.wsid)))
     for d in dem_sorted:
         for e in emps:
+            # 🚫 Día libre (RT0) o AUSENTE → no crear variable
+            if e.off(d.date) or e.absent_day(d.date):
+                if ASCII_LOGS:
+                    print(f"[VARS/SKIP-ABS] {e.name} {d.date} → libre/ausente; no candidato.")
+                continue
+
             # Prioridad CA1: si el día NO está en overrides (usershift_enforced),
             # no aplicamos disponibilidad general; sólo verificamos habilitación.
             free_today = (e.id, d.date) in overrides_emp_day
@@ -2455,6 +2481,12 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
             return (0 if us_enf else (1 if st_day else 2), len(e.roles), e.name)
 
         for e in sorted(emps, key=prio):
+            # 🚫 Día libre (RT0) o AUSENTE → fuera
+            if e.off(d.date) or e.absent_day(d.date):
+                if ASCII_LOGS:
+                    print(f"[VARS2/SKIP-ABS] {e.name} {d.date} → libre/ausente; no candidato.")
+                continue
+
             if not e.can(d.wsid):
                 continue
 
@@ -2890,6 +2922,10 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
         for day in sorted(by_day.keys()):
             if (e.id, day) in overrides:
                 continue
+            # 🚫 Día libre (RT0) o AUSENTE → saltar
+            if e.off(day) or e.absent_day(day):
+                continue
+
             dow = day.weekday()
             if dow not in getattr(e, "us_two_starts_dow", set()):
                 continue
@@ -3083,6 +3119,10 @@ def greedy_fallback(emps: List[Emp], dem: List[Demand], week: List[date],
                     break
                 if not emp.can(dm.wsid):
                     continue
+                # 🚫 Día libre (RT0) o AUSENTE
+                if emp.off(day) or emp.absent_day(day):
+                    continue
+
 
                 enforced = (emp.id, day) not in overrides
                 if not enforced:
