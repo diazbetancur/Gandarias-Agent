@@ -850,7 +850,6 @@ def pick_template(cur, week_start: date, week_end: date):
     if chosen: return (chosen["id"], chosen["name"])
     raise DataNotFoundError("No se encontró plantilla con demandas > 0")
 
-# ───────── CARGA DATOS ─────────
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
@@ -1001,7 +1000,7 @@ def load_data(week_start: date):
                 for _tgt in fallbacks_by_id.get(_r, []):
                     _e.roles.add(_tgt)
 
-        # 3) Restricciones semanales (0–5)
+        # 3) Restricciones semanales (0–5) → RT
         for uid3, dow, rt, f1, t1, b1s, b1e, b2s, b2e in fetchall(
             cur,
             '''
@@ -1052,18 +1051,16 @@ def load_data(week_start: date):
                     emp.window[dow].append(w)
                 continue
 
-        # === AJUSTE: “descanso otorgado por restricción” (solo si hay al menos un día 0 en la semana) ===
-        week_dows = {d.weekday() for d in week}  # 0..6 de la semana actual
+        # === INFO: “descanso otorgado por restricción” (detecta si hay ≥1 RT=0 en la semana) ===
+        week_dows = {d.weekday() for d in week}  # 0..6 L-D
         for e in emps:
-            # Tiene algún DOW con RT=0 dentro de esta semana
             has_rt0 = any((dow in e.day_off) for dow in week_dows)
             e.has_rt0_this_week = has_rt0
-            e.rest_exempt_from_additional = bool(has_rt0)  # bandera para el solver: NO forzarle otro descanso extra
-            # Fechas concretas de esa semana que caen en RT=0
+            e.rest_exempt_from_additional = bool(has_rt0)
             e.rest_exempt_dates = {d for d in week if d.weekday() in e.day_off} if has_rt0 else set()
             if ASCII_LOGS and has_rt0:
                 dow_names = ", ".join(sorted({_dow_es(d.weekday()) for d in e.rest_exempt_dates}))
-                print(f"[REST-EXEMPT] {e.name}: tiene RT=0 en semana ({dow_names}) → exento de descanso adicional.")
+                print(f"[REST-EXEMPT] {e.name}: tiene RT=0 en semana ({dow_names}) → cuentan como libres.")
 
         # 4) Excepciones y ausencias
         for uid4, d_exc, rt, f, t in fetchall(
@@ -1170,7 +1167,7 @@ def load_data(week_start: date):
             if st['is_split'] and st.get('b2_start') and st.get('b2_end') and st['b2_start'] < _cap(st['b2_end']):
                 emp.shift_type_windows[dowX].append((st['b2_start'], _cap(st['b2_end'])))
 
-        # 6) UserShifts: construir ventanas a partir de la tabla UserShifts
+        # 6) UserShifts → construir ventanas (incluye casos multi-start)
         def _cap_end_from_start(start_t: time, candidate_end: time | None) -> time:
             end_eff = candidate_end or time(23, 59)
             if end_eff == time(0, 0): end_eff = time(23, 59)
@@ -1204,14 +1201,14 @@ def load_data(week_start: date):
 
         # Inicializar marcadores de US reales
         for e in emps:
-            e.has_us_row_by_dow = defaultdict(bool)   # << nuevo
-            e.no_assign_by_date = set()               # << nuevo
+            e.has_us_row_by_dow = defaultdict(bool)
+            e.no_assign_by_date = set()  # (se usa para US-ENFORCE en alguna lógica)
 
         # (A–D) Construcción desde UserShifts + multi-Block1Start
         for (uid7, day), rows in groups.items():
             if uid7 not in emps_map: continue
             emp = emps_map[uid7]
-            emp.has_us_row_by_dow[day] = True  # << marcar que este día tiene US real
+            emp.has_us_row_by_dow[day] = True
             windows: list[tuple[time, time]] = []
 
             # Multi Block1Start sin lastStart ni bloque 2
@@ -1315,19 +1312,6 @@ def load_data(week_start: date):
                             emp.user_shift_windows[day].append((ws, we))
                     if b1s and b2s: emp.us_two_starts_dow.add(day)
 
-            # ShiftTypes compatibles (sólo informativo)
-            for st in shift_types:
-                ss = _t2m(st['start_time'])
-                se = _t2m(st['end_time'] if st['end_time'] != time(0, 0) else time(23, 59))
-                def st_inside_window(a: time, b: time) -> bool:
-                    return _t2m(a) <= ss and se <= _t2m(b)
-                def window_inside_st(a: time, b: time) -> bool:
-                    return ss <= _t2m(a) and _t2m(b) <= se
-                for (ws, we) in emps_map[uid7].user_shift_windows.get(day, []):
-                    if st_inside_window(ws, we) or window_inside_st(ws, we):
-                        emps_map[uid7].user_shifts[day].add(st['id'])
-                        break
-
         # CASO E: día SIN UserShift -> construir desde ST (permanece igual)
         for e in emps:
             for dow in range(7):
@@ -1397,16 +1381,86 @@ def load_data(week_start: date):
                         print(f"[ANCHOR] {e.name} {ddate} → ancla {_m2t(earliest_min).strftime('%H:%M')} "
                               f"(ws='{earliest_dm.wsname}', seg={earliest_dm.start.strftime('%H:%M')}-{earliest_dm.end.strftime('%H:%M')})")
                 else:
-                    # ⛔ ENFORCE: hay UserShift real para este dow y no hay demanda compatible
+                    # ENFORCE si hay US real pero sin demanda compatible
                     if e.has_us_row_by_dow.get(dow, False):
                         e.no_assign_by_date.add(ddate)
-                        e.absent.add(ddate)                 # bloquear en el planificador
-                        e.abs_reason[ddate] = 'US-ENFORCE'  # razón diferenciada
+                        e.absent.add(ddate)                 # ← bloqueo duro visible como US-ENFORCE
+                        e.abs_reason[ddate] = 'US-ENFORCE'
                         if ASCII_LOGS:
-                            print(f"[US-ENFORCE] {e.name} {ddate} → tiene UserShift pero sin demanda compatible → NO ASIGNAR (bloqueado).")
+                            print(f"[US-ENFORCE] {e.name} {ddate} → US real sin demanda compatible → NO ASIGNAR.")
+
                     else:
                         if ASCII_LOGS:
                             print(f"[ANCHOR] {e.name} {ddate} → ventanas (p.e. por ST) sin demanda; no se aplica US-ENFORCE.")
+
+        # 6.c) **POLÍTICA EXACTA DE 2 DÍAS LIBRES (LUN–DOM) CONTANDO RT==0, SIN ABS VISIBLES**
+        #     - Si tiene 0×RT==0 en la semana → forzar 2 libres.
+        #     - Si tiene 1×RT==0 → forzar 1 libre.
+        #     - Si tiene ≥2×RT==0 → no forzar.
+        #     Selección por prioridad: (1) sin RT y sin US real, (2) sin US real, (3) resto (con RT 1..5/US).
+        forced_free_by_emp = {}
+        for e in emps:
+            # RT==0 en esta semana (cuenta como libres ya)
+            rt0_dates = [d for d in week if d.weekday() in e.day_off]
+            needed = max(0, 2 - len(rt0_dates))
+            if needed <= 0:
+                forced_free_by_emp[e.id] = []
+                continue
+
+            def has_us_real(day: date) -> bool:
+                return bool(e.has_us_row_by_dow.get(day.weekday(), False))
+
+            def has_rt_any(day: date) -> bool:
+                dw = day.weekday()
+                return (dw in e.day_off) or bool(e.window.get(dw))
+
+            # Tier 1: sin RT (no rt0 ni rt1..5) y sin US real, sin ausencia
+            tier1 = [d for d in week
+                     if (d.weekday() not in e.day_off)
+                     and (not e.window.get(d.weekday()))
+                     and (not has_us_real(d))
+                     and (not e.absent_day(d))]
+
+            # Tier 2: sin US real (aunque tengan RT 1..5), sin ausencia, no repetidos
+            tier2 = [d for d in week
+                     if (d not in tier1)
+                     and (d.weekday() not in e.day_off)  # no contar RT==0 (ya libre)
+                     and (not has_us_real(d))
+                     and (not e.absent_day(d))]
+
+            # Tier 3: resto de días hábiles del empleado en la semana (evitamos seleccionar RT==0)
+            tier3 = [d for d in week
+                     if (d not in tier1 and d not in tier2)
+                     and (d.weekday() not in e.day_off)
+                     and (not e.absent_day(d))]
+
+            chosen = []
+            for pool in (tier1, tier2, tier3):
+                for d in pool:
+                    if len(chosen) >= needed:
+                        break
+                    chosen.append(d)
+                if len(chosen) >= needed:
+                    break
+
+            # Aplicar bloqueo "silencioso" (sin ABS/OBS):
+            # - Borrar ventanas US/ST de ese DOW
+            # - Borrar ventanas RT (para que available() no permita en libre)
+            # - Vaciar excepciones de ese día (si las hubiera)
+            for d in chosen:
+                dw = d.weekday()
+                # Eliminar TODAS las ventanas del día forzado
+                e.user_shift_windows[dw] = []
+                e.shift_type_windows[dw] = []
+                e.has_us_row_by_dow[dw] = False
+                e.window[dw] = []          # limpiar RT 1..5 de ese DOW en esta semana
+                e.exc[d] = []              # asegurar que no “resucite” disponibilidad por excepción
+
+                if ASCII_LOGS:
+                    print(f"[FORCED-FREE] {e.name} {d.isoformat()} ({_dow_es(dw)}) → LIBRE forzado sin ABS (tier={'1' if d in tier1 else '2' if d in tier2 else '3'})")
+
+            e.forced_free_dates = set(chosen)  # marca interna sólo informativa
+            forced_free_by_emp[e.id] = [d.isoformat() for d in chosen]
 
         # 7) Leyes
         row = fetchall(
@@ -1438,7 +1492,7 @@ def load_data(week_start: date):
             except Exception:
                 pass
 
-        # 8) Cortes por bordes de UserShift
+        # 8) Cortes por bordes de UserShift (después de aplicar forced-free)
         extra_cuts_by_date = build_extra_cuts_from_usershifts_edges_only(emps_map, week)
         if ASCII_LOGS:
             dbg = {d.isoformat(): sorted(list(v))[:10] for d, v in extra_cuts_by_date.items()}
@@ -1455,19 +1509,18 @@ def load_data(week_start: date):
         if not demands:
             raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
 
-    # Metadatos de la política de descanso por restricción (señal para los solvers)
+    # Metadatos de la política de descanso (señal para diagnósticos / debugging)
     rest_policy_meta = {
         "rest_exempt_emp_ids": [e.id for e in emps if getattr(e, "rest_exempt_from_additional", False)],
         "rest_exempt_dates_by_emp": {
             e.id: sorted([d.isoformat() for d in getattr(e, "rest_exempt_dates", set())])
             for e in emps if getattr(e, "rest_exempt_from_additional", False)
         },
-        "note": "Exentos de forzar descanso adicional por tener al menos un día RT=0 en la semana."
+        "forced_free_by_emp": forced_free_by_emp,  # ← NUEVO: libres forzados (sin ABS) para llegar a EXACTAMENTE 2 L-D
+        "policy_note": "Política L-D: exactamente 2 días libres por persona contando RT==0; si faltan, se fuerzan sin ABS/OBS."
     }
 
     return emps, demands, tpl_name, week, rest_policy_meta, shift_types, min_hours_required
-# ───────── UserShift planner (enforce vs free) ─────────
-
 
 def plan_usershift_day_modes(emps: List[Emp], demands: List[Demand], week: List[date]):
     overrides = set()
