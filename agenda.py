@@ -14,7 +14,7 @@ import logging
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
-from typing import List, Tuple, Dict, Set
+from typing import Iterable, Dict, Tuple, List, Set, Any
 
 import psycopg2
 from flask import Flask, jsonify, request
@@ -909,12 +909,162 @@ def fetch_law_restrictions_by_id(ids: dict = None) -> dict:
     return {"resolved": resolved, "raw": raw}
 
 
+def assign_days_off_after_assignment(
+    emps: Iterable[Any],
+    week: List[date],
+    sched: Any,
+    min_days_off_per_week: int,
+) -> Dict[Any, Set[date]]:
+    """
+    Selecciona días libres por empleado combinando:
+      1) RT==0 de BD (día exacto según DOW de la restricción semanal)
+      2) Días adicionales necesarios para llegar a 'min_days_off_per_week',
+         elegidos por menor tiempo trabajado (minutos asignados), excluyendo ABS/VAC.
+
+    - 'emps': colección de objetos empleado. Se espera que cada 'emp' tenga:
+        emp.id                      -> identificador estable
+        emp.day_off: set[int]       -> DOWs con RT==0 (0=Lun..6=Dom)
+        emp.absent: set[date]       -> días con ausencia (ABS/VAC)
+    - 'week': lista de 7 fechas (mon..sun o como uses), misma semana planificada
+    - 'sched': estructura del plan ya asignado (solver/greedy). Soportamos varios formatos.
+    - 'min_days_off_per_week': N de la tabla LawRestrictions
+
+    Devuelve: { emp.id : set({date,...}) }
+    """
+    # --- 0) helpers internos -----------------------------------------------
+    def _is_time_like(x) -> bool:
+        return isinstance(x, time) or (isinstance(x, datetime))
+
+    def _to_minutes(t: time | datetime) -> int:
+        if isinstance(t, datetime):
+            return t.hour * 60 + t.minute
+        return t.hour * 60 + t.minute
+
+    def _block_minutes(start: Any, end: Any) -> int:
+        # Bloque start/end -> minutos (robusto a time/datetime)
+        if not (_is_time_like(start) and _is_time_like(end)):
+            return 0
+        sm, em = _to_minutes(start), _to_minutes(end)
+        if em <= sm:
+            em += 24 * 60  # tolera cruces raros 00:00
+        return max(0, em - sm)
+
+    # --- 1) extraer minutos asignados por (emp_id, date) --------------------
+    # Soportamos varios "shapes" comunes de sched para no romper integración.
+    minutes_by_emp_date: Dict[Tuple[Any, date], int] = defaultdict(int)
+
+    def _ingest_tuple_key_map(m: Dict[Tuple[Any, date], Any]):
+        # m[(emp_id, date)] = list[(start,end)] | list[dict] | ...
+        for (uid, d), blocks in m.items():
+            total = 0
+            if isinstance(blocks, list):
+                for b in blocks:
+                    if isinstance(b, tuple) and len(b) >= 2:
+                        total += _block_minutes(b[0], b[1])
+                    elif isinstance(b, dict):
+                        s = b.get('start') or b.get('s') or b.get('from')
+                        e = b.get('end')   or b.get('e') or b.get('to')
+                        total += _block_minutes(s, e)
+            minutes_by_emp_date[(uid, d)] += total
+
+    def _ingest_flat_list(lst: List[Any]):
+        # lst = [ { user_id/employee_id, date, start, end }, ... ]
+        for rec in lst:
+            if not isinstance(rec, dict):
+                continue
+            uid = rec.get('user_id') or rec.get('employee_id') or rec.get('emp_id') or rec.get('uid')
+            d   = rec.get('date') or rec.get('day') or rec.get('fecha')
+            s   = rec.get('start') or rec.get('s') or rec.get('from')
+            e   = rec.get('end')   or rec.get('e') or rec.get('to')
+            if isinstance(d, str):
+                try:
+                    d = datetime.fromisoformat(d).date()
+                except Exception:
+                    # Si viene como 'YYYY-MM-DD' simple:
+                    try:
+                        y, m, dd = d.split('-')
+                        d = date(int(y), int(m), int(dd))
+                    except Exception:
+                        d = None
+            if uid is not None and isinstance(d, date):
+                minutes_by_emp_date[(uid, d)] += _block_minutes(s, e)
+
+    # Detecta forma de 'sched'
+    if hasattr(sched, 'emp_day_minutes') and isinstance(sched.emp_day_minutes, dict):
+        # Caso A: ya trae minutos por (uid, date)
+        for (uid, d), minutes in sched.emp_day_minutes.items():
+            minutes_by_emp_date[(uid, d)] += int(minutes or 0)
+
+    elif isinstance(sched, dict):
+        # Caso B1: dict interno conocido
+        if 'emp_day_minutes' in sched and isinstance(sched['emp_day_minutes'], dict):
+            for (uid, d), minutes in sched['emp_day_minutes'].items():
+                minutes_by_emp_date[(uid, d)] += int(minutes or 0)
+        # Caso B2: mapas por tupla (emp_id, date) -> [bloques]
+        elif any(isinstance(k, tuple) and len(k) == 2 for k in sched.keys()):
+            _ingest_tuple_key_map(sched)
+        # Caso B3: subconjuntos comunes
+        elif 'by_emp_date' in sched and isinstance(sched['by_emp_date'], dict):
+            _ingest_tuple_key_map(sched['by_emp_date'])
+        elif 'assignments' in sched and isinstance(sched['assignments'], list):
+            _ingest_flat_list(sched['assignments'])
+
+    elif isinstance(sched, list):
+        # Caso C: lista plana de asignaciones
+        _ingest_flat_list(sched)
+
+    # --- 2) construir selección de días libres ------------------------------
+    out: Dict[Any, Set[date]] = {}
+    week_set = set(week)
+
+    for emp in emps:
+        uid = getattr(emp, 'id', getattr(emp, 'Id', None))
+        if uid is None:
+            # si no hay id visible, usamos el objeto como clave (no deseable, pero seguro)
+            uid = emp
+
+        # RT==0 definidos en BD -> “preseleccionados”
+        rt0_dows: Set[int] = set(getattr(emp, 'day_off', set()) or set())
+        preselected_rt0: Set[date] = {d for d in week if d.weekday() in rt0_dows}
+
+        # ABS/VAC para excluir de la parte "elegida por menor tiempo"
+        abs_days: Set[date] = set(getattr(emp, 'absent', set()) or set())
+
+        # Número requerido por ley
+        N = int(min_days_off_per_week or 0)
+
+        chosen: Set[date] = set(preselected_rt0) & week_set  # sólo los de la semana
+        k = len(chosen)
+
+        # Si faltan “libres” para llegar a N, elegir por menor trabajo (excluye ABS/VAC y RT==0)
+        if k < N:
+            need = N - k
+            # candidatos: días de la semana que no estén ya elegidos ni sean ABS/VAC
+            candidates: List[Tuple[int, date]] = []
+            for d in week:
+                if d in chosen or d in abs_days:
+                    continue
+                # minutos trabajados ese día:
+                minutes = minutes_by_emp_date.get((uid, d), 0)
+                candidates.append((minutes, d))
+            # ordenar por (minutos asc, día asc)
+            candidates.sort(key=lambda t: (t[0], t[1]))
+            for _, d in candidates[:need]:
+                chosen.add(d)
+
+        # NOTA: si k > N, mantenemos todos los RT==0 (la BD manda).
+        out[uid] = chosen
+
+    return out
 
 
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
 
+    # -------------------------------
+    # Helpers locales
+    # -------------------------------
     def _to_time(x):
         if x is None:
             return None
@@ -957,6 +1107,40 @@ def load_data(week_start: date):
             out.append((cur, DAY_END))
         return out
 
+    def _merge_windows(blocks):
+        """Une intervalos [s,e) que se solapan, para usar en estimación de carga."""
+        ivs = [(s, e if e != time(0, 0) else time(23, 59)) for (s, e) in blocks if s and e and s < (e if e != time(0, 0) else time(23, 59))]
+        ivs.sort(key=lambda p: (p[0], p[1]))
+        merged = []
+        for s, e in ivs:
+            if not merged or s > merged[-1][1]:
+                merged.append([s, e])
+            else:
+                merged[-1][1] = max(merged[-1][1], e)
+        return [(a, b) for (a, b) in merged]
+
+    def _dm_minutes(dm):
+        ee = dm.end if dm.end != time(0, 0) else time(23, 59)
+        return max(0, _t2m(ee) - _t2m(dm.start))
+
+    def _inside_any(dm_start: time, dm_end: time, wins: list[tuple[time, time]]) -> bool:
+        """¿El segmento demanda [dm_start, dm_end] cabe en alguna ventana?"""
+        dm_end = dm_end if dm_end != time(0, 0) else time(23, 59)
+        for ws, we in wins:
+            we = we if we != time(0, 0) else time(23, 59)
+            if ws <= dm_start and dm_end <= we:
+                return True
+        return False
+
+    def _windows_for_date(emp, ddate: date) -> list[tuple[time, time]]:
+        """Ventanas disponibles del empleado para ese día (US si existen; de lo contrario weekly/ST; más excepciones de fecha)."""
+        dow = ddate.weekday()
+        wins = list(emp.user_shift_windows.get(dow, []))
+        if not wins:
+            wins = list(emp.window.get(dow, [])) + list(emp.shift_type_windows.get(dow, []))
+        wins += emp.exc.get(ddate, [])
+        return _merge_windows(wins)
+
     def _dow_es(dow: int) -> str:
         return ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][dow % 7]
 
@@ -967,11 +1151,11 @@ def load_data(week_start: date):
         laws = fetch_law_restrictions_by_id()
         L = laws["resolved"] if laws else {}
 
-        # Fallbacks (por si la tabla no trae valores)
+        # Fallbacks
         _fallback_max_day = 9
         _fallback_min_split = 3
         _fallback_min_shift = 3
-        _fallback_min_between_shifts = 12  # ← 12h entre turnos
+        _fallback_min_between_shifts = 12  # 12h entre turnos
 
         MAX_HOURS_PER_DAY         = int(L.get("max_hours_per_day")         or _fallback_max_day)
         MIN_HOURS_BETWEEN_SPLIT   = int(L.get("min_hours_between_split")   or _fallback_min_split)
@@ -1194,6 +1378,7 @@ def load_data(week_start: date):
             emp = emps_map[uid4]
             if rt == 0:
                 emp.absent.add(d_exc)
+                emp.abs_reason[d_exc] = 'VAC' if emp.abs_reason.get(d_exc) != 'ABS' else emp.abs_reason.get(d_exc, 'ABS')
             else:
                 s = _to_time(f); e = _to_time(t)
                 if s and e and s < e:
@@ -1216,8 +1401,6 @@ def load_data(week_start: date):
             while d0 <= ed:
                 emp.absent.add(d0); emp.abs_reason[d0] = 'VAC'
                 d0 += timedelta(days=1)
-
-        # (El bloque viejo de UserAbsenteeisms se eliminó; ya se aplicó en 2.a)
 
         # 5) ShiftTypes y restricciones por ST
         shift_types = []
@@ -1450,7 +1633,7 @@ def load_data(week_start: date):
             for ddate in week:
                 if e.absent_day(ddate):
                     if ASCII_LOGS:
-                        print(f"[ANCHOR/SKIP-ABS] {e.name} {ddate} → AUSENTE (ABS); no se evalúa ancla.")
+                        print(f"[ANCHOR/SKIP-ABS] {e.name} {ddate} → AUSENTE (ABS/VAC); no se evalúa ancla.")
                     continue
 
                 dow = ddate.weekday()
@@ -1487,45 +1670,92 @@ def load_data(week_start: date):
                         if ASCII_LOGS:
                             print(f"[ANCHOR] {e.name} {ddate} → ventanas (p.e. por ST) sin demanda; no se aplica US-ENFORCE.")
 
-        # 6.c) Política EXACTA de días libres (desde BD)
+        # -------------------------------
+        # 6.c) Política EXACTA de días libres (con “menor carga esperada”)
+        #     - ABS/VAC cuentan como descanso (igual que RT==0) para reducir 'needed'
+        #     - Selección de libres forzados ordenando por la métrica de minutos aprovechables
+        # -------------------------------
+        # Pre-index de demandas por fecha para eficiencia
+        demands_by_date: dict[date, list] = defaultdict(list)
+        for dm in demands:
+            demands_by_date[dm.date].append(dm)
+
+        def _expected_minutes(emp, ddate: date) -> int:
+            """Minutos de demanda que emp PODRÍA cubrir ese día (WS compatibles ∩ ventanas)."""
+            if emp.absent_day(ddate):
+                return 0
+            wins = _windows_for_date(emp, ddate)
+            if not wins:
+                return 0
+            mins = 0
+            for dm in demands_by_date.get(ddate, []):
+                if not emp.can(dm.wsid):
+                    continue
+                dm_end = dm.end if dm.end != time(0, 0) else time(23, 59)
+                if _inside_any(dm.start, dm_end, wins):
+                    mins += _dm_minutes(dm)
+            return mins
+
         forced_free_by_emp = {}
         for e in emps:
-            rt0_dates = [d for d in week if d.weekday() in e.day_off]
-            needed = max(0, MIN_DAYS_OFF_PER_WEEK - len(rt0_dates))
+            # Días RT==0 en semana
+            rt0_dates = {d for d in week if d.weekday() in e.day_off}
+            # ABS/VAC (solo los marcados como tales, no US-ENFORCE)
+            abs_vac_dates = {d for d in week if e.absent_day(d) and e.abs_reason.get(d) in ('ABS', 'VAC')}
+
+            baseline_rest = rt0_dates | abs_vac_dates
+            needed = max(0, MIN_DAYS_OFF_PER_WEEK - len(baseline_rest))
 
             if needed <= 0:
                 forced_free_by_emp[e.id] = []
+                e.forced_free_dates = set()
+                if ASCII_LOGS and baseline_rest:
+                    print(f"[FORCED-FREE/SKIP] {e.name} ya cumple libres con RT0/ABS/VAC → needed=0")
                 continue
 
             def has_us_real(day: date) -> bool:
                 return bool(e.has_us_row_by_dow.get(day.weekday(), False))
 
+            # Pools de elegibilidad (sin tocar la construcción actual)
             tier1 = [d for d in week
                      if (d.weekday() not in e.day_off)
                      and (not e.window.get(d.weekday()))
                      and (not has_us_real(d))
-                     and (not e.absent_day(d))]
+                     and (not e.absent_day(d))
+                     and (d not in baseline_rest)]
 
             tier2 = [d for d in week
                      if (d not in tier1)
                      and (d.weekday() not in e.day_off)
                      and (not has_us_real(d))
-                     and (not e.absent_day(d))]
+                     and (not e.absent_day(d))
+                     and (d not in baseline_rest)]
 
             tier3 = [d for d in week
                      if (d not in tier1 and d not in tier2)
                      and (d.weekday() not in e.day_off)
-                     and (not e.absent_day(d))]
+                     and (not e.absent_day(d))
+                     and (d not in baseline_rest)]
 
+            # *** Criterio por “menor carga esperada” ***
+            # Ordenamos cada pool por los MINUTOS aprovechables crecientes.
+            # Tie-breaker determinista por ordinal de fecha.
             chosen = []
             for pool in (tier1, tier2, tier3):
-                for d in pool:
+                if not pool:
+                    continue
+                sorted_pool = sorted(
+                    pool,
+                    key=lambda di: (_expected_minutes(e, di), di.toordinal())
+                )
+                for d in sorted_pool:
                     if len(chosen) >= needed:
                         break
                     chosen.append(d)
                 if len(chosen) >= needed:
                     break
 
+            # Aplicar libres forzados elegidos
             for d in chosen:
                 dw = d.weekday()
                 e.user_shift_windows[dw] = []
@@ -1534,7 +1764,9 @@ def load_data(week_start: date):
                 e.window[dw] = []
                 e.exc[d] = []
                 if ASCII_LOGS:
-                    print(f"[FORCED-FREE] {e.name} {d.isoformat()} ({_dow_es(dw)}) → LIBRE forzado sin ABS (tier={'1' if d in tier1 else '2' if d in tier2 else '3'})")
+                    mins = _expected_minutes(e, d)
+                    print(f"[FORCED-FREE] {e.name} {d.isoformat()} ({_dow_es(dw)}) → LIBRE forzado "
+                          f"(mins_esperados={mins}, pool={'1' if d in tier1 else '2' if d in tier2 else '3'})")
 
             e.forced_free_dates = set(chosen)
             forced_free_by_emp[e.id] = [d.isoformat() for d in chosen]
@@ -1570,14 +1802,23 @@ def load_data(week_start: date):
         if not demands:
             raise DataNotFoundError("La plantilla seleccionada no tiene demandas")
 
+    # Meta para debugging/reportes
     rest_policy_meta = {
         "rest_exempt_emp_ids": [e.id for e in emps if getattr(e, "rest_exempt_from_additional", False)],
         "rest_exempt_dates_by_emp": {
             e.id: sorted([d.isoformat() for d in getattr(e, "rest_exempt_dates", set())])
             for e in emps if getattr(e, "rest_exempt_from_additional", False)
         },
+        "abs_or_vac_by_emp": {
+            e.id: sorted([d.isoformat() for d in week if e.absent_day(d) and e.abs_reason.get(d) in ('ABS','VAC')])
+            for e in emps
+        },
         "forced_free_by_emp": forced_free_by_emp,
-        "policy_note": f"Política L-D: exactamente {MIN_DAYS_OFF_PER_WEEK} días libres por persona contando RT==0; si faltan, se fuerzan sin ABS/OBS."
+        "policy_note": (
+            "Política L-D: exactamente MIN_DAYS_OFF_PER_WEEK por persona; "
+            "RT==0 y ABS/VAC cuentan como descanso; si faltan, se fuerzan "
+            "priorizando días con menor 'minutos demandados aprovechables'."
+        )
     }
 
     return emps, demands, tpl_name, week, rest_policy_meta, shift_types, min_hours_required
