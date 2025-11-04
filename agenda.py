@@ -412,6 +412,249 @@ def build_shifttype_window_penalty(mdl, emps, dem, X, overrides=set()):
                 penalties.append(z)
     return (WEIGHT_USERWINDOW * sum(penalties)) if penalties else 0
 
+def recheck_fill_unmet(emps: list['Emp'],
+                       demands: list['Demand'],
+                       week: list[date],
+                       sched: dict[date, list[tuple['Emp','Demand']]],
+                       coverage_stats: dict,
+                       overrides: set[tuple[str, date]]) -> None:
+    """
+    Post-proceso para rellenar demanda no cubierta.
+    * Forma BLOQUES CONTIGUOS del mismo WS por día (pero ya NO exige que el bloque alcance 3h por sí solo).
+    * Regla de mínimos corregida:
+        - Si el empleado ya reúne >= MIN_SHIFT_DURATION_HOURS en el día, se permite añadir bloques más cortos
+          siempre que respete GAP entre splits y no solape ni supere topes.
+        - Si el empleado aún no llega al mínimo diario, el bloque añadido debe llevar el total del día
+          a >= MIN_SHIFT_DURATION_HOURS (no es necesario que un único bloque tenga esa duración).
+    * Se respetan: US/ST (en forzado dentro de US), solapes, GAP de splits, MAX_HOURS_PER_DAY y MAX_DAYS_PER_WEEK.
+    * Prioriza a quienes tienen menos minutos HOY (y luego menos en la semana).
+    Modifica in-place: sched y coverage_stats.
+    """
+    from collections import defaultdict
+
+    def _end_for_calc(t: time) -> time:
+        return t if t != time(0, 0) else time(23, 59)
+
+    def _dm_iv(dm: 'Demand') -> tuple[int,int]:
+        return _t2m(dm.start), _t2m(_end_for_calc(dm.end))
+
+    def _contiguous(dma: 'Demand', dmb: 'Demand') -> bool:
+        if dma.date != dmb.date or (dma.wsid is None) or (dmb.wsid is None):
+            return False
+        if (dma.wsname or "").strip().upper() != (dmb.wsname or "").strip().upper():
+            return False
+        sa, ea = _dm_iv(dma); sb, eb = _dm_iv(dmb)
+        return ea == sb
+
+    def _can_cover_ws(e: 'Emp', wsname: str) -> bool:
+        if e.can(wsname):
+            return True
+        for fb in ROLE_FALLBACKS_BY_NAME.get(wsname, []):
+            if e.can(fb):
+                return True
+        return False
+
+    def _allowed_by_usershift(e: 'Emp', dm: 'Demand') -> bool:
+        # Si el día está en override: se permite fuera de US, pero igual aplica el mínimo diario.
+        if (e.id, dm.date) in overrides:
+            return True
+        return inside_usershift_window(e, dm, overrides)
+
+    def _build_usage():
+        used_any = defaultdict(lambda: defaultdict(list))   # eid -> day -> [(s,e)]
+        minutes_by_day = defaultdict(lambda: defaultdict(int))
+        minutes_by_week = defaultdict(int)
+        days_worked = defaultdict(set)
+        for dday, pairs in sched.items():
+            for e, dm in pairs:
+                s, e_end = _dm_iv(dm)
+                used_any[e.id][dday].append((s, e_end))
+                minutes_by_day[e.id][dday] += (e_end - s)
+                minutes_by_week[e.id] += (e_end - s)
+                if dm.wsid is not None:
+                    days_worked[e.id].add(dday)
+        for eid in list(used_any.keys()):
+            for dday in list(used_any[eid].keys()):
+                used_any[eid][dday] = _merge_sorted(used_any[eid][dday])
+        return used_any, minutes_by_day, minutes_by_week, days_worked
+
+    def _fits_daily_caps(e: 'Emp', day: date, extra_min: int, minutes_today: int, days_worked_count: int) -> bool:
+        if minutes_today + extra_min > MAX_HOURS_PER_DAY * 60:
+            return False
+        inc_day = 0 if minutes_today > 0 else 1
+        return (days_worked_count + inc_day) <= MAX_DAYS_PER_WEEK
+
+    def _validate_after_merge(e: 'Emp',
+                              day: date,
+                              used_today: list[tuple[int,int]],
+                              add_block: list[tuple[int,int]]) -> bool:
+        """
+        Valida:
+        - Gaps entre bloques >= MIN_HOURS_BETWEEN_SPLIT
+        - Si minutos_previos < mínimo, entonces minutos_totales_post >= mínimo
+        - Si minutos_previos >= mínimo, se aceptan agregados más cortos
+        """
+        merged = _merge_sorted(used_today + add_block)
+        if not _respect_split_gap(merged, MIN_HOURS_BETWEEN_SPLIT):
+            return False
+
+        minutes_previos = sum(b - a for a, b in used_today)
+        total_dia = sum(b - a for a, b in merged)
+        min_req = MIN_SHIFT_DURATION_HOURS * 60
+
+        if minutes_previos >= min_req:
+            return True  # ya cumplía el mínimo, el agregado es válido por GAP
+        else:
+            return total_dia >= min_req
+
+    def _choose_candidates(day: date, wsname: str):
+        cands = []
+        for e in emps:
+            if not _can_cover_ws(e, wsname):
+                continue
+            cands.append((minutes_by_day[e.id].get(day, 0), minutes_by_week[e.id], e))
+        cands.sort(key=lambda t: (t[0], t[1]))
+        return cands
+
+    # --- Estado inicial
+    used_any, minutes_by_day, minutes_by_week, days_worked = _build_usage()
+
+    # unmet por dm
+    unmet_left = {dm.id: max(0, (coverage_stats.get(dm.id) or {}).get("unmet", getattr(dm, "need", 0))) for dm in demands}
+
+    # DMs con unmet por día y WS
+    from collections import defaultdict as _dd
+    dms_by_day_ws = _dd(lambda: _dd(list))
+    for dm in demands:
+        st = coverage_stats.get(dm.id)
+        if not st or dm.wsid is None:
+            continue
+        if st["unmet"] > 0:
+            dms_by_day_ws[dm.date][dm.wsname].append(dm)
+
+    for day in list(dms_by_day_ws.keys()):
+        for ws in list(dms_by_day_ws[day].keys()):
+            dms_by_day_ws[day][ws].sort(key=lambda d: (_t2m(d.start), _t2m(_end_for_calc(d.end))))
+
+    touched_days: set[date] = set()
+
+    # --- Relleno por runs contiguos
+    for day, wsmap in dms_by_day_ws.items():
+        for wsname, dm_list in wsmap.items():
+            idx = 0
+            while idx < len(dm_list):
+                dm0 = dm_list[idx]
+                if unmet_left.get(dm0.id, 0) <= 0:
+                    idx += 1
+                    continue
+
+                # Construir RUN contiguo
+                run = [dm0]
+                j = idx + 1
+                while j < len(dm_list) and _contiguous(dm_list[j - 1], dm_list[j]):
+                    run.append(dm_list[j])
+                    j += 1
+
+                # Probar candidatos (menos carga hoy/semana primero)
+                assigned = False
+                candidates = _choose_candidates(day, wsname)
+
+                for _, _, e in candidates:
+                    todays = used_any[e.id].get(day, [])
+                    minutes_today = minutes_by_day[e.id].get(day, 0)
+                    need_min_today = max(0, MIN_SHIFT_DURATION_HOURS * 60 - minutes_today)
+
+                    # construir bloque con la menor cantidad de slots del RUN que:
+                    #   - el empleado pueda cubrir,
+                    #   - no solape,
+                    #   - y nos acerque a need_min_today (si es > 0); si need_min_today == 0, tomar el primer slot válido.
+                    block_ivs: list[tuple[int,int]] = []
+                    block_dms: list['Demand'] = []
+                    tmp_used = todays[:]
+                    acc = 0
+
+                    for dm in run:
+                        if unmet_left.get(dm.id, 0) <= 0:
+                            continue
+                        if not _allowed_by_usershift(e, dm):
+                            continue
+                        s, e_end = _dm_iv(dm)
+                        if not e.available(day, _m2t(s), _m2t(e_end)):
+                            continue
+                        if _has_overlap(tmp_used, s, e_end):
+                            continue
+
+                        # Tentativamente añadir
+                        block_ivs.append((s, e_end))
+                        block_dms.append(dm)
+                        tmp_used = _merge_sorted(tmp_used + [(s, e_end)])
+                        acc += (e_end - s)
+
+                        # Si ya cumplimos con need_min_today, podemos parar (greedy)
+                        if need_min_today > 0 and acc >= need_min_today:
+                            break
+                        # Si ya teníamos el mínimo, basta con el primer slot válido
+                        if need_min_today == 0 and acc > 0:
+                            break
+
+                    if not block_ivs:
+                        continue
+
+                    extra_min = sum(b - a for a, b in block_ivs)
+                    # Topes diarios
+                    if not _fits_daily_caps(e, day, extra_min, minutes_today, len(days_worked[e.id])):
+                        continue
+
+                    if not _validate_after_merge(e, day, todays, block_ivs):
+                        continue
+
+                    # Confirmar: insertar todos los dms del bloque
+                    for dm in block_dms:
+                        if unmet_left.get(dm.id, 0) <= 0:
+                            continue
+                        s, e_end = _dm_iv(dm)
+                        sched.setdefault(day, []).append((e, dm))
+                        unmet_left[dm.id] -= 1
+                        st = coverage_stats[dm.id]
+                        st["covered"] += 1
+                        st["unmet"] = max(0, st["unmet"] - 1)
+                        used_any[e.id][day] = _merge_sorted(used_any[e.id].get(day, []) + [(s, e_end)])
+                        minutes_by_day[e.id][day] = minutes_by_day[e.id].get(day, 0) + (e_end - s)
+                        minutes_by_week[e.id] += (e_end - s)
+                        days_worked[e.id].add(day)
+                        touched_days.add(day)
+
+                    assigned = True
+                    # tras asignar, no avanzamos idx si aún queda unmet en dm_list[idx]; re-evaluamos
+                    break
+
+                if not assigned:
+                    # no pudimos cubrir el inicio del RUN -> saltar al final del RUN
+                    idx = j
+                else:
+                    # si ya está cubierto el dm en idx, avanzar al siguiente con unmet>0
+                    while idx < len(dm_list) and unmet_left.get(dm_list[idx].id, 0) <= 0:
+                        idx += 1
+
+    if touched_days:
+        for dday in touched_days:
+            sched[dday] = _filter_blocks_min4_and_gap_global(
+                sched.get(dday, []),
+                overrides,
+                MIN_SHIFT_DURATION_HOURS,
+                MIN_HOURS_BETWEEN_SPLIT
+            )
+        # Recalcular coverage
+        for dm in demands:
+            if dm.wsid is None:
+                continue
+            covered = sum(1 for e2, d2 in sched.get(dm.date, []) if d2.id == dm.id)
+            entry = coverage_stats.get(dm.id) or {"demand": dm}
+            entry["demand"] = dm
+            entry["covered"] = covered
+            entry["unmet"] = max(0, dm.need - covered)
+            entry["coverage_pct"] = round(covered / dm.need * 100, 1) if dm.need else 100
+            coverage_stats[dm.id] = entry
 
 
 
@@ -3951,6 +4194,7 @@ def generate_flexible(week_start: date):
     # 1) Intento CP-SAT flexible
     try:
         sched, coverage_stats, days_off_diag = solve_flexible(emps, demands, week, overrides, min_hours_required)
+        recheck_fill_unmet(emps, demands, week, sched, coverage_stats, overrides)
         solved_by = "cp_sat"
     except ScheduleGenerationError:
         sched, coverage_stats = greedy_fallback(emps, demands, week, overrides)
