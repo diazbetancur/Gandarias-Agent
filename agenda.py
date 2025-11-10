@@ -4159,7 +4159,7 @@ def generate(week_start: date):
 
             # Lógica de observación
             if dm.wsid is None:
-                obs = "VAC" if emp.abs_reason.get(d) == "VAC" else "ABS"
+                obs = "ABS" if emp.abs_reason.get(d) == "VAC" else "ABS"
             else:
                 # Si es UserShift enforzado y termina al final del día del WS → observación vacía
                 if enforced_us and ws_latest_end_min is not None and cur_end_min == ws_latest_end_min:
@@ -4275,7 +4275,7 @@ def generate_flexible(week_start: date):
             enforced_us = (emp.id, d) not in overrides
 
             if dm.wsid is None:
-                obs = "VAC" if emp.abs_reason.get(d) == "VAC" else "ABS"
+                obs = "ABS" if emp.abs_reason.get(d) == "VAC" else "ABS"
             else:
                 if enforced_us and ws_latest_end_min is not None and cur_end_min == ws_latest_end_min:
                     obs = ""
@@ -4295,6 +4295,256 @@ def generate_flexible(week_start: date):
             })
     
     return res, sched, emps, week, set()
+
+# ───────── Post-proceso UserShift estricto + reasignación ─────────
+
+def _seg_minutes(dm) -> int:
+    """Duración (min) de un segmento de demanda."""
+    if dm is None or dm.start is None or dm.end is None:
+        return 0
+    end = dm.end
+    # En la BD fin 00:00 significa 24:00 del mismo día
+    if end == time(0, 0):
+        end = time(23, 59)
+    return max(0, (end.hour * 60 + end.minute) - (dm.start.hour * 60 + dm.start.minute))
+
+
+def _merge_windows_simple(wins: list[tuple[time, time]]) -> list[tuple[time, time]]:
+    """Une ventanas [start,end] solapadas; asume mismo día."""
+    if not wins:
+        return []
+    wins = sorted(wins, key=lambda w: (w[0], w[1]))
+    merged: list[list[time, time]] = [[wins[0][0], wins[0][1]]]
+    for s, e in wins[1:]:
+        s0, e0 = merged[-1]
+        if s <= e0:
+            if e > e0:
+                merged[-1][1] = e
+        else:
+            merged.append([s, e])
+    return [(s, e) for s, e in merged if s < e]
+
+
+def _effective_windows_for(emp, d: date) -> list[tuple[time, time]]:
+    """
+    Ventanas efectivas para validar asignaciones en el post-proceso:
+    - Si hay user_shift_windows para ese DOW: se usan como base.
+    - Si no, se usan window + shift_type_windows.
+    - Se agregan ventanas excepcionales por fecha (exc).
+    """
+    dow = d.weekday()
+    wins: list[tuple[time, time]] = []
+
+    us_wins = getattr(emp, "user_shift_windows", {}).get(dow, [])
+    if us_wins:
+        wins.extend(us_wins)
+    else:
+        wins.extend(getattr(emp, "window", {}).get(dow, []) or [])
+        wins.extend(getattr(emp, "shift_type_windows", {}).get(dow, []) or [])
+
+    wins.extend(getattr(emp, "exc", {}).get(d, []) or [])
+
+    norm: list[tuple[time, time]] = []
+    for s, e in wins:
+        if e == time(0, 0):
+            e = time(23, 59)
+        if s < e:
+            norm.append((s, e))
+
+    return _merge_windows_simple(norm)
+
+
+def _can_take_segment_usershift_safe(
+    emp,
+    d: date,
+    dm,
+    by_emp_day: dict[tuple[str, date], list],
+    week_minutes: dict[str, int],
+) -> bool:
+    """
+    Verifica si 'emp' puede recibir 'dm' en 'd' sin romper:
+      - Ausencias / días libres / no_assign_by_date
+      - Rol del puesto
+      - Ventanas horarias efectivas
+      - Tope de horas/día (MAX_HOURS_PER_DAY)
+      - No solapar con bloques ya asignados
+      - Coherencia con UserShift estricto (si aplica):
+            si existe anchor para el día, el earliest start (incluyendo dm) debe ser == anchor.
+    """
+    # Ausencias / días prohibidos
+    if getattr(emp, "no_assign_by_date", None) and d in emp.no_assign_by_date:
+        return False
+    if emp.off(d) or emp.absent_day(d):
+        return False
+
+    # Rol
+    if dm.wsid is not None and not emp.can(dm.wsid):
+        return False
+
+    # Duración
+    seg_min = _seg_minutes(dm)
+    if seg_min <= 0:
+        return False
+
+    # Ventanas efectivas
+    wins = _effective_windows_for(emp, d)
+    if wins:
+        end = dm.end if dm.end != time(0, 0) else time(23, 59)
+        ok = any(dm.start >= ws and end <= (we if we != time(0, 0) else time(23, 59))
+                 for ws, we in wins)
+        if not ok:
+            return False
+
+    # No solapar con su horario actual
+    existing = by_emp_day.get((emp.id, d), [])
+    end = dm.end if dm.end != time(0, 0) else time(23, 59)
+    for cur in existing:
+        c_end = cur.end if cur.end != time(0, 0) else time(23, 59)
+        if not (end <= cur.start or dm.start >= c_end):
+            return False
+
+    # Tope horas por día (usa MAX_HOURS_PER_DAY seteado en load_data; fallback 9h)
+    day_min = sum(_seg_minutes(cur) for cur in existing)
+    max_day_min = (globals().get("MAX_HOURS_PER_DAY") or 9) * 60
+    if day_min + seg_min > max_day_min:
+        return False
+
+    # Coherencia con UserShift: si hay anchor para ese día, el earliest debe ser EXACTO
+    anchor_by_date = getattr(emp, "user_shift_anchor_by_date", {})
+    anchor = anchor_by_date.get(d)
+    has_us = getattr(emp, "has_us_row_by_dow", {}).get(d.weekday(), False)
+
+    if anchor:
+        all_segments = existing + [dm]
+        earliest = min(all_segments, key=lambda x: (x.start, x.end)).start
+        if earliest != anchor:
+            return False
+    elif has_us:
+        # Tiene UserShift pero sin anchor (modo libre); se permite mientras cumpla ventanas.
+        pass
+
+    return True
+
+
+def enforce_usershift_exact_and_reassign(emps, week, sched):
+    """
+    1) Para cada empleado/día con UserShift ANCLADO (user_shift_anchor_by_date):
+         - Si tiene asignaciones y su primer bloque NO inicia en el anchor,
+           se eliminan TODAS sus asignaciones de ese día.
+    2) Cada segmento liberado se intenta reasignar a otro empleado compatible:
+         - Respeta `_can_take_segment_usershift_safe`.
+         - Prioriza:
+             a) Empleados SIN anchor estricto ese día (modo libre).
+             b) Luego, quienes tengan MENOS minutos totales en la semana.
+    Modifica `sched` in-place (dict[date] -> list[(Emp, Demand)]).
+    """
+    if not sched:
+        return
+
+    from collections import defaultdict
+
+    emap = {e.id: e for e in emps}
+
+    # Índices iniciales
+    by_emp_day: dict[tuple[str, date], list] = defaultdict(list)
+    week_minutes: dict[str, int] = defaultdict(int)
+
+    for d, assigns in sched.items():
+        for emp, dm in assigns:
+            by_emp_day[(emp.id, d)].append(dm)
+            week_minutes[emp.id] += _seg_minutes(dm)
+
+    freed: list[tuple[date, object]] = []
+
+    # 1) Limpiar días con UserShift mal alineado
+    for (eid, d), dms in list(by_emp_day.items()):
+        if not dms:
+            continue
+        emp = emap.get(eid)
+        if not emp:
+            continue
+
+        anchor_by_date = getattr(emp, "user_shift_anchor_by_date", {})
+        anchor = anchor_by_date.get(d)
+        if not anchor:
+            continue  # ese día no es US estricto
+
+        if getattr(emp, "no_assign_by_date", None) and d in emp.no_assign_by_date:
+            # Si por alguna razón tiene asignaciones, se limpian
+            if dms:
+                if ASCII_LOGS:
+                    print(f"[US-STRICT] {emp.name} {d} no_assign_by_date con asignaciones ⇒ se limpian.")
+                new_list = [(e2, dm) for (e2, dm) in sched[d] if e2.id != eid]
+                for _dm in dms:
+                    freed.append((d, _dm))
+                    week_minutes[eid] -= _seg_minutes(_dm)
+                sched[d] = new_list
+                by_emp_day[(eid, d)] = []
+            continue
+
+        earliest_dm = min(dms, key=lambda x: (x.start, x.end))
+        if earliest_dm.start != anchor:
+            # Día con US pero arrancando en hora distinta → se libera TODO ese día para ese empleado
+            if ASCII_LOGS:
+                print(
+                    f"[US-STRICT] {emp.name} {d} anchor={anchor.strftime('%H:%M')} "
+                    f"pero earliest={earliest_dm.start.strftime('%H:%M')} ⇒ se libera el día completo."
+                )
+            new_list = []
+            for (e2, dm) in sched[d]:
+                if e2.id == eid:
+                    freed.append((d, dm))
+                    week_minutes[eid] -= _seg_minutes(dm)
+                else:
+                    new_list.append((e2, dm))
+            sched[d] = new_list
+            by_emp_day[(eid, d)] = []
+
+    if not freed:
+        return
+
+    # Recalcular índices tras limpiar
+    by_emp_day.clear()
+    week_minutes = defaultdict(int)
+    for d, assigns in sched.items():
+        for emp, dm in assigns:
+            by_emp_day[(emp.id, d)].append(dm)
+            week_minutes[emp.id] += _seg_minutes(dm)
+
+    # 2) Reasignar segmentos liberados
+    for d, dm in freed:
+        candidates = []
+        for e in emps:
+            if not _can_take_segment_usershift_safe(e, d, dm, by_emp_day, week_minutes):
+                continue
+            anc = getattr(e, "user_shift_anchor_by_date", {}).get(d)
+            is_strict = 1 if anc else 0   # primero libres (0), luego con anchor (1)
+            candidates.append((is_strict, week_minutes.get(e.id, 0), e.name, e))
+
+        if not candidates:
+            if ASCII_LOGS:
+                end = dm.end if dm.end != time(0, 0) else time(23, 59)
+                print(
+                    f"[US-STRICT] Sin candidato para {dm.wsname} {d} "
+                    f"{dm.start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
+                )
+            continue
+
+        candidates.sort()
+        chosen = candidates[0][3]
+
+        sched[d].append((chosen, dm))
+        by_emp_day[(chosen.id, d)].append(dm)
+        week_minutes[chosen.id] += _seg_minutes(dm)
+
+        if ASCII_LOGS:
+            end = dm.end if dm.end != time(0, 0) else time(23, 59)
+            print(
+                f"[US-STRICT] Reasignado {dm.wsname} {d} "
+                f"{dm.start.strftime('%H:%M')}-{end.strftime('%H:%M')} a {chosen.name}"
+            )
+
+
 
 # ───────── Coalesce para guardar ─────────
 def coalesce_employee_day_workstation(assigns_day):
@@ -4358,35 +4608,65 @@ def save():
     wk = data.get('week_start')
     force = data.get('force', False)
     flexible = data.get('flexible', True)
-    if not wk: return jsonify({"error":"Falta week_start"}), 400
+
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
+
     try:
         ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
     except ValueError:
-        return jsonify({"error":"Fecha inválida"}), 400
+        return jsonify({"error": "Fecha inválida"}), 400
+
     we = ws + timedelta(days=6)
 
+    # 1) Generar horario
     try:
-        res, sched, emps, week, fixed_ids = (generate_flexible(ws) if flexible else generate(ws))
+        res, sched, emps, week, fixed_ids = (
+            generate_flexible(ws) if flexible else generate(ws)
+        )
     except (DatabaseConnectionError, DataNotFoundError) as e:
         return jsonify({"error": str(e)}), 400
+
+    # 2) APLICAR reglas de UserShift estricto + reasignación
+    #    (esta función ya debe estar definida arriba en el archivo)
+    enforce_usershift_exact_and_reassign(emps, week, sched)
+
+    # 3) Logs debug (igual que tenías)
     for d in sorted(sched.keys()):
-        javier_raw = [(emp.name, dm.wsname, dm.start, dm.end) for emp, dm in sched[d] 
-                    if emp.id == "cfb790cc-fd37-4c51-a81b-65caa1859020"]
+        javier_raw = [
+            (emp.name, dm.wsname, dm.start, dm.end)
+            for emp, dm in sched[d]
+            if emp.id == "cfb790cc-fd37-4c51-a81b-65caa1859020"
+        ]
         if javier_raw:
             print(f"[DEBUG-PRE-COALESCE] {d}: {javier_raw}")
 
-
-    # Inserción determinista (coalescida) con la nueva lógica de observación
+    # 4) Inserción determinista (idéntica a la tuya)
     try:
         with conn() as c, c.cursor() as cur:
-            cur.execute('SELECT COUNT(*) FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
+            cur.execute(
+                'SELECT COUNT(*) FROM "Management"."Schedules" '
+                'WHERE "Date" BETWEEN %s AND %s',
+                (ws, we),
+            )
             if cur.fetchone()[0] and not force:
-                return jsonify({"error": "Horario ya existe para esa semana"}), 409
-            if force:
-                cur.execute('DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
+                return jsonify(
+                    {"error": "Horario ya existe para esa semana"}
+                ), 409
 
-            # Reconstruir overrides (días en free_mode). Si NO está aquí ⇒ usershift_enforced
-            overrides_list = (res.get("summary", {}) or {}).get("usershift_free_overrides", []) or []
+            if force:
+                cur.execute(
+                    'DELETE FROM "Management"."Schedules" '
+                    'WHERE "Date" BETWEEN %s AND %s',
+                    (ws, we),
+                )
+
+            # Reconstruir overrides (días en free_mode)
+            overrides_list = (
+                (res.get("summary", {}) or {})
+                .get("usershift_free_overrides", [])
+                or []
+            )
             overrides_set = {
                 (str(o.get("employee_id")), datetime.fromisoformat(o.get("date")).date())
                 for o in overrides_list
@@ -4394,25 +4674,47 @@ def save():
             }
 
             latest_map_all_by_wsid = res.get("latest_end_by_wsid", {}) or {}
-            latest_map_all_by_day  = res.get("latest_end_of_day", {}) or {}
+            latest_map_all_by_day = res.get("latest_end_of_day", {}) or {}
 
             for d in sorted(sched.keys()):
-                ass = sorted(sched[d], key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start)))
+                ass = sorted(
+                    sched[d],
+                    key=lambda x: (
+                        x[0].name,
+                        x[1].wsname,
+                        _t2m(x[1].start),
+                    ),
+                )
 
                 # Ausencias
                 for emp, dm in ass:
                     if dm.wsid is None:
-                        cur.execute('''
+                        cur.execute(
+                            '''
                             INSERT INTO "Management"."Schedules"
-                                ("Id","Date","UserId","WorkstationId","StartTime","EndTime","Observation","IsDeleted","DateCreated")
+                                ("Id","Date","UserId","WorkstationId",
+                                 "StartTime","EndTime","Observation",
+                                 "IsDeleted","DateCreated")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (uid(), d, str(emp.id), None, None, None, emp.abs_reason.get(d,'ABS'), False, now()))
+                            ''',
+                            (
+                                uid(),
+                                d,
+                                str(emp.id),
+                                None,
+                                None,
+                                None,
+                                emp.abs_reason.get(d, 'ABS'),
+                                False,
+                                now(),
+                            ),
+                        )
 
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
-                # --- CAP de 9h/día por empleado (recorte “cinturón y tirantes”) ---
-                DAILY_CAP_MIN = MAX_HOURS_PER_DAY * 60  # 540
+                # --- CAP de 9h/día por empleado ---
+                DAILY_CAP_MIN = MAX_HOURS_PER_DAY * 60
                 remaining_quota = {}
                 for (eid0, _wsid0), _rows0 in coalesced.items():
                     remaining_quota.setdefault(eid0, DAILY_CAP_MIN)
@@ -4429,16 +4731,18 @@ def save():
                         remaining_quota[eid0] = quota - use
                         if (ne - ns) >= MIN_SEGMENT_MINUTES:
                             if ASCII_LOGS and use < seg:
-                                print(f"[SAVE-CAP9H] Recorte {emp0.name} {d} ws={wsid0}: "
-                                      f"{_m2t(s0).strftime('%H:%M')}-{_m2t(e0 if e0 < 24*60 else 0).strftime('%H:%M')}"                                       f"→ {_m2t(ns).strftime('%H:%M')}-{_m2t(ne if ne < 24*60 else 0).strftime('%H:%M')}")
+                                print(
+                                    f"[SAVE-CAP9H] Recorte {emp0.name} {d} ws={wsid0}: "
+                                    f"{_m2t(s0).strftime('%H:%M')}-{_m2t(e0 if e0 < 24*60 else 0).strftime('%H:%M')}"
+                                    f" → {_m2t(ns).strftime('%H:%M')}-{_m2t(ne if ne < 24*60 else 0).strftime('%H:%M')}"
+                                )
                             new_rows.append((emp0, ns, ne, src0))
                     coalesced[(eid0, wsid0)] = new_rows
                 # --- fin CAP 9h ---
 
                 day_key = d.isoformat()
-                # { wsid_str -> end_min } y fin global del día
                 latest_end_by_wsid_min = latest_map_all_by_wsid.get(day_key, {}) or {}
-                latest_end_of_day_min  = latest_map_all_by_day.get(day_key, None)
+                latest_end_of_day_min = latest_map_all_by_day.get(day_key, None)
 
                 for (eid, wsid), rows in coalesced.items():
                     if wsid is None:
@@ -4446,55 +4750,85 @@ def save():
 
                     for emp, s_min, e_min, src_dms in rows:
                         s_t = _m2t(s_min)
-                        e_t = _m2t(e_min if e_min < 24*60 else 0)
+                        e_t = _m2t(e_min if e_min < 24 * 60 else 0)
                         dur_min = e_min - s_min
                         if dur_min < MIN_SEGMENT_MINUTES:
                             if ASCII_LOGS:
-                                print(f"[SAVE-GUARD] Segmento <{MIN_SEGMENT_MINUTES}m omitido: "
+                                print(
+                                    f"[SAVE-GUARD] Segmento <{MIN_SEGMENT_MINUTES}m omitido: "
                                     f"user={emp.name}, fecha={d}, wsid={wsid}, "
-                                    f"{s_t.strftime('%H:%M')}-{e_t.strftime('%H:%M')}")
+                                    f"{s_t.strftime('%H:%M')}-{e_t.strftime('%H:%M')}"
+                                )
                             continue
 
-
-                        has_fixed = any((emp.id, dm.id) in fixed_ids for dm in src_dms)
+                        has_fixed = any(
+                            (emp.id, dm.id) in fixed_ids for dm in src_dms
+                        )
                         if has_fixed:
                             obs = ""
                         else:
                             enforced_us = (str(emp.id), d) not in overrides_set
 
                             if wsid is None:
-                                obs = "VAC" if emp.abs_reason.get(d, '') == 'VAC' else "ABS"
+                                obs = (
+                                    "ABS"
+                                    if emp.abs_reason.get(d, "") == "VAC"
+                                    else "ABS"
+                                )
                             else:
-                                last_wsid_end = latest_end_by_wsid_min.get(str(wsid))        # fin del día por puesto
-                                last_day_end  = latest_end_of_day_min                        # fin global del día (cualquier puesto)
+                                last_wsid_end = latest_end_by_wsid_min.get(str(wsid))
+                                last_day_end = latest_end_of_day_min
 
-                                # Si es usershift_enforced y el bloque termina cuando termina el día
-                                # del puesto O cuando termina el día global → sin observación.
                                 if enforced_us and (
-                                    (last_wsid_end is not None and e_min == last_wsid_end) or
-                                    (last_day_end  is not None and e_min == last_day_end)
+                                    (last_wsid_end is not None and e_min == last_wsid_end)
+                                    or (last_day_end is not None and e_min == last_day_end)
                                 ):
                                     obs = ""
-                                # Si NO es usershift_enforced, aplica la regla normal C/BT por puesto
-                                elif (last_wsid_end is not None and e_min == last_wsid_end):
+                                elif last_wsid_end is not None and e_min == last_wsid_end:
                                     obs = "C"
                                 else:
                                     obs = "BT"
-                        cur.execute('''
+
+                        cur.execute(
+                            '''
                             INSERT INTO "Management"."Schedules"
-                                ("Id","Date","UserId","WorkstationId","StartTime","EndTime","Observation","IsDeleted","DateCreated")
+                                ("Id","Date","UserId","WorkstationId",
+                                 "StartTime","EndTime","Observation",
+                                 "IsDeleted","DateCreated")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (
-                            uid(), d, str(emp.id), str(wsid),
-                            timedelta(hours=s_t.hour, minutes=s_t.minute),
-                            timedelta(hours=e_t.hour, minutes=e_t.minute),
-                            obs, False, now()
-                        ))
+                            ''',
+                            (
+                                uid(),
+                                d,
+                                str(emp.id),
+                                str(wsid),
+                                timedelta(
+                                    hours=s_t.hour, minutes=s_t.minute
+                                ),
+                                timedelta(
+                                    hours=e_t.hour, minutes=e_t.minute
+                                ),
+                                obs,
+                                False,
+                                now(),
+                            ),
+                        )
             c.commit()
     except Exception as e:
-        return jsonify({"error": "Error al guardar", "detail": str(e)}), 500
+        return jsonify(
+            {"error": "Error al guardar", "detail": str(e)}
+        ), 500
 
-    return jsonify({"message": ("Horario guardado (flexible)" if flexible else "Horario guardado"), **res}), 201
+    return jsonify(
+        {
+            "message": (
+                "Horario guardado (flexible)"
+                if flexible
+                else "Horario guardado"
+            ),
+            **res,
+        }
+    ), 201
 
 # ───────── MAIN ─────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
