@@ -11,6 +11,9 @@ AGENDA GENERATOR API – Gandarías v3.15c (determinista + reglas split + fallba
 """
 
 import logging
+import math
+import math
+
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -136,9 +139,20 @@ class Demand:
     def __init__(self, row: Tuple):
         (self.id, rdate, self.wsid, self.wsname, self.start, self.end, need) = row
         self.date = rdate.date() if hasattr(rdate, 'date') else rdate
-        self.need = int(need)
+        self.raw_need = float(need) if need is not None else 0.0
+        # Marcar híbrido 0.5 y normalizar need interno:
+        # - si es 0.5: tratamos como 1 "slot" asignable pero con reglas de pareo
+        # - si es >= 1: entero normal
+        if abs(self.raw_need - 0.5) < 1e-6:
+            self.is_hybrid_05 = True
+            self.need = 1
+        else:
+            self.is_hybrid_05 = False
+            self.need = int(math.ceil(self.raw_need))
         self.slot_index = 0
         self.shift_type = None
+        # clave de grupo híbrido por franja; se rellena en load_data
+        self.hybrid_key_05 = None
 
 # ───────── HELPERS ─────────
 def _end_for_calc(t: time) -> time:
@@ -1490,6 +1504,44 @@ def load_data(week_start: date):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
         emps = [emps_map[k] for k in sorted(emps_map.keys())]
+        # --- CONFIG HÍBRIDA 0.5 ---
+        # 1) Leer grupos desde "Management"."HybridWorkstations" (A/B/C)
+        hybrid_rows = fetchall(cur, '''
+            WITH hw AS (
+                SELECT "Id" AS group_id, "WorkstationAId" AS wsid
+                FROM "Management"."HybridWorkstations" WHERE COALESCE("IsDeleted", FALSE)=FALSE
+                UNION ALL
+                SELECT "Id", "WorkstationBId"
+                FROM "Management"."HybridWorkstations" WHERE COALESCE("IsDeleted", FALSE)=FALSE
+                UNION ALL
+                SELECT "Id", "WorkstationCId"
+                FROM "Management"."HybridWorkstations"
+                WHERE COALESCE("IsDeleted", FALSE)=FALSE AND "WorkstationCId" IS NOT NULL
+            )
+            SELECT group_id, wsid FROM hw WHERE wsid IS NOT NULL ORDER BY group_id, wsid
+        ''')
+
+        from collections import defaultdict as _dd
+        hybrid_groups = _dd(set)     # group_id -> {wsid,}
+        for grp, wsid in hybrid_rows:
+            hybrid_groups[grp].add(wsid)
+
+        # 2) Etiquetar cada demanda 0,5 con su grupo (si su WS pertenece a alguno)
+        for dm in demands:
+            if getattr(dm, "is_hybrid_05", False):
+                for grp, wsids in hybrid_groups.items():
+                    if dm.wsid in wsids:
+                        dm.hybrid_group_05 = grp
+                        break
+
+        # 3) Elegibilidad de empleados: grupos en los que el empleado posee >=2 WS
+        for e in emps:
+            ws_owned = set(getattr(e, "roles", []))
+            e.hybrid_groups_05 = set()
+            for grp, wsids in hybrid_groups.items():
+                if len(ws_owned.intersection(wsids)) >= 2:
+                    e.hybrid_groups_05.add(grp)
+        # --- /CONFIG HÍBRIDA 0.5 ---
 
         # === 2.a) AUSENTISMOS (HARD BLOCK)
         for uid_abs, sd_abs, ed_abs in fetchall(
@@ -1519,6 +1571,31 @@ def load_data(week_start: date):
             cnt_abs = sum(1 for e in emps_map.values() if any(d in week for d in e.absent))
             if cnt_abs:
                 print(f"[ABSENTEEISMS] Empleados con ausentismos en semana: {cnt_abs}")
+        # --- HÍBRIDO 0.5: indexar demandas 0,5 por franja y marcar elegibilidad por empleado ---
+        from collections import defaultdict as _dd
+
+        # 2.1) Indexar demandas 0,5 por (fecha, inicio, fin)
+        hyb_by_slot = _dd(list)    # (date, start, end) -> [Demand...]
+        ws_by_slot  = _dd(set)     # (date, start, end) -> {wsname,...}
+
+        for dm in demands:
+            if getattr(dm, "is_hybrid_05", False):
+                key = (dm.date, dm.start, dm.end)
+                dm.hybrid_key_05 = key
+                hyb_by_slot[key].append(dm)
+                if dm.wsname:
+                    ws_by_slot[key].add((dm.wsname or "").strip().upper())
+
+        # 2.2) Para cada empleado, qué franjas híbridas puede tomar (≥2 WS de esa franja)
+        for e in emps:
+            e.hybrid_groups_05 = set()
+            roles_upper = {(r or "").strip().upper() for r in getattr(e, "roles", set())}
+            for key, ws_set in ws_by_slot.items():
+                # ¿cuántos WS de esa franja puede cubrir el empleado?
+                cnt = sum(1 for ws in ws_set if (ws in roles_upper))
+                if cnt >= 2 and len(ws_set) >= 2 and len(hyb_by_slot[key]) >= 2:
+                    e.hybrid_groups_05.add(key)
+
 
         # Fallbacks de roles por nombre (expansión)
         name2id = {}
@@ -3023,6 +3100,12 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
 
             if not e.can(d.wsid):
                 continue
+            # Si es una demanda 0,5, solo crear variable si el empleado pertenece al grupo con >=2 WS
+            if getattr(d, "is_hybrid_05", False):
+                grp = getattr(d, "hybrid_group_05", None)
+                if not grp or grp not in getattr(e, "hybrid_groups_05", set()):
+                    continue  # no crear X[e,d]
+
 
             free_today = (e.id, d.date) in overrides
             two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))  # ← FIX NameError
@@ -3058,6 +3141,11 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
                 if ASCII_LOGS and two_starts_today and st_wins:
                     print(f"[ST-BYPASS-2STARTS] {e.name} {d.date.isoformat()} DOW={dow} → "
                           f"permitimos dentro de US aunque no haya ventana ST")
+            # Si es un 0,5: solo crear variable si el empleado puede tomar al menos 2 de la franja
+            if getattr(d, "is_hybrid_05", False):
+                key = getattr(d, "hybrid_key_05", None)
+                if (not key) or (key not in getattr(e, "hybrid_groups_05", set())):
+                    continue
 
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
 
@@ -3261,7 +3349,47 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
     for d in dem:
         covered = sum(X[e.id, d.id] for e in emps_subset if (e.id, d.id) in X)
         mdl.Add(covered + unmet[d.id] == d.need)
-        # ── RESTRICCIÓN (con slack) para priorizar RESTRINGIDOS sobre LIBRES en cada segmento ──
+    # --- HÍBRIDO 0.5: misma franja+grupo => 0 o 2 plazas por empleado ---
+    from collections import defaultdict as _dd2
+    hybrid_slots = _dd2(list)  # (date, start, end, group) -> [Demand]
+
+    for d in dem:
+        if getattr(d, "is_hybrid_05", False) and getattr(d, "hybrid_group_05", None):
+            key = (d.date, d.start, d.end, d.hybrid_group_05)
+            hybrid_slots[key].append(d)
+
+    for (dt, s, e_time, grp), dlist in hybrid_slots.items():
+        # Si solo hay 1 demanda 0,5 en esa franja/grupo, nadie puede tomarla
+        if len(dlist) == 1:
+            d0 = dlist[0]
+            for emp in emps_subset:
+                if (emp.id, d0.id) in X:
+                    mdl.Add(X[emp.id, d0.id] == 0)
+            continue
+
+        # Hay 2+ demandas 0,5 en la misma franja/grupo
+        for emp in emps_subset:
+            if grp not in getattr(emp, "hybrid_groups_05", set()):
+                for dd in dlist:
+                    if (emp.id, dd.id) in X:
+                        mdl.Add(X[emp.id, dd.id] == 0)
+                continue
+
+            vars_emp = [X[emp.id, dd.id] for dd in dlist if (emp.id, dd.id) in X]
+            if not vars_emp:
+                continue
+            if len(vars_emp) < 2:
+                for v in vars_emp:
+                    mdl.Add(v == 0)
+                continue
+
+            cnt = mdl.NewIntVar(0, len(vars_emp),
+                                f"hyb05_cnt_{emp.id}_{dt.isoformat()}_{s.strftime('%H%M')}_{grp}")
+            mdl.Add(cnt == sum(vars_emp))
+            mdl.AddAllowedAssignments([cnt], [(0,), (2,)])   # exactamente 0 o 2
+    # --- /HÍBRIDO 0.5 ---
+
+    # ── RESTRICCIÓN (con slack) para priorizar RESTRINGIDOS sobre LIBRES en cada segmento ──
     # Si hay R candidatos restringidos para el segmento, pedimos usar hasta min(need, R).
     # Si el modelo usa menos restringidos de los posibles, aparece un slack penalizado en el objetivo.
     restricted_shortfall_terms = []
@@ -3281,19 +3409,40 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
 
 
     # No solapes mismo empleado/mismo día
+    def _coassignable(d1, d2):
+        return (getattr(d1, "is_hybrid_05", False)
+                and getattr(d2, "is_hybrid_05", False)
+                and getattr(d1, "hybrid_group_05", None)
+                and d1.hybrid_group_05 == getattr(d2, "hybrid_group_05", None)
+                and d1.start == d2.start
+                and d1.end == d2.end)
+
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
+
     for day in sorted(by_day.keys()):
         lst = sorted(by_day[day], key=lambda z: (_t2m(z.start), _t2m(z.end)))
         for i in range(len(lst)):
             for j in range(i+1, len(lst)):
-                if overlap(lst[i], lst[j]):
+                if overlap(lst[i], lst[j]) and not _coassignable(lst[i], lst[j]):
                     for e in emps_subset:
                         if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
                             mdl.Add(X[e.id, lst[i].id] + X[e.id, lst[j].id] <= 1)
+        # --- MÍNIMO DIARIO DURO ---
+        min_daily = MIN_SHIFT_DURATION_HOURS * 60
+        for e in emps_subset:
+            for dday in week:
+                todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
+                if not todays:
+                    continue
+                y_work = mdl.NewBoolVar(f"y_work_{e.id}_{dday.isoformat()}")
+                mdl.Add(sum(X[e.id, dm.id] for dm in todays) >= 1).OnlyEnforceIf(y_work)
+                mdl.Add(sum(X[e.id, dm.id] for dm in todays) == 0).OnlyEnforceIf(y_work.Not())
+                mdl.Add(sum(duration_min(dm) * X[e.id, dm.id] for dm in todays) >= min_daily).OnlyEnforceIf(y_work)
+        # --- /MÍNIMO DIARIO DURO ---
 
-    # Máx. 9h/día
+    # Máx. h/día
     for e in emps_subset:
         for dday in week:
             todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
@@ -3403,6 +3552,54 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
         for e in emps_subset:
             if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
                 out[d.date].append((e, d))
+    # --- REGLA HÍBRIDA 0.5: por franja y empleado, contar 0 o 2 ---
+    hybrid_slots = defaultdict(list)  # (date, start, end) -> [Demand...]
+    for dseg in dem:
+        if getattr(dseg, "is_hybrid_05", False) and getattr(dseg, "hybrid_key_05", None):
+            hybrid_slots[dseg.hybrid_key_05].append(dseg)
+
+    for key, dlist in hybrid_slots.items():
+        if len(dlist) < 2:
+            # con 1 sola 0,5 en franja no se puede asignar a nadie
+            for emp in emps_subset:
+                for d0 in dlist:
+                    if (emp.id, d0.id) in X:
+                        mdl.Add(X[emp.id, d0.id] == 0)
+            continue
+
+        for emp in emps_subset:
+            vars_emp = [X[emp.id, d.id] for d in dlist if (emp.id, d.id) in X]
+            if not vars_emp:
+                continue
+            # Exactamente 0 o 2 (si hay más de 2 slots en la franja, seguimos obligando a tomar 2 máximo)
+            cnt = mdl.NewIntVar(0, 2, f"hyb05_cnt_{emp.id}_{key[0].isoformat()}_{key[1].strftime('%H%M')}")
+            mdl.Add(cnt == sum(vars_emp))
+            mdl.AddAllowedAssignments([cnt], [(0,), (2,)])
+        if ASCII_LOGS:
+            from collections import defaultdict as _dd
+            print("\n[HYB-0.5] Asignaciones híbridas (0.5)")
+
+            minutes_by_emp_day = _dd(int)
+            any_hyb = False
+
+            for day in sorted(out.keys()):
+                for emp, dm in out[day]:
+                    minutes_by_emp_day[(emp.id, emp.name, day)] += duration_min(dm)
+                    if getattr(dm, "is_hybrid_05", False):
+                        any_hyb = True
+                        print(f"[HYB-0.5] {day} {dm.start.strftime('%H:%M')}-{dm.end.strftime('%H:%M')} "
+                            f"WS={dm.wsname} -> {emp.name}")
+
+            if not any_hyb:
+                print("[HYB-0.5] (sin asignaciones híbridas en esta ejecución)")
+
+            print("\n[HOURS] Minutos por empleado y día")
+            min_daily = MIN_SHIFT_DURATION_HOURS * 60
+            for (eid, ename, day), mins in sorted(minutes_by_emp_day.items(), key=lambda x: (x[0][2], x[0][1])):
+                warn = ""
+                if 0 < mins < min_daily:
+                    warn = f"  << BELOW DAILY MIN ({mins} < {min_daily} min)"
+                print(f"[HOURS] {day} {ename}: {mins} min ({mins/60.0:.2f} h){warn}")
 
     days_off_diag = build_days_off_diagnostics(sol, meta_days_off, emps_subset, dem)
     return out, coverage_stats, remaining_demands, days_off_diag
