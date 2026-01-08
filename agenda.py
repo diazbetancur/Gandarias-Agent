@@ -11,9 +11,6 @@ AGENDA GENERATOR API – Gandarías v3.15c (determinista + reglas split + fallba
 """
 
 import logging
-import math
-import math
-
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -137,22 +134,40 @@ class Emp:
 
 class Demand:
     def __init__(self, row: Tuple):
+        """
+        row = (Id, Date, WorkstationId, WorkstationName, Start, End, EffortRequired)
+        EffortRequired puede ser 0.5 en los puestos híbridos.
+        """
         (self.id, rdate, self.wsid, self.wsname, self.start, self.end, need) = row
+
+        # Fecha normalizada
         self.date = rdate.date() if hasattr(rdate, 'date') else rdate
-        self.raw_need = float(need) if need is not None else 0.0
-        # Marcar híbrido 0.5 y normalizar need interno:
-        # - si es 0.5: tratamos como 1 "slot" asignable pero con reglas de pareo
-        # - si es >= 1: entero normal
-        if abs(self.raw_need - 0.5) < 1e-6:
-            self.is_hybrid_05 = True
+
+        # Guardamos el valor "crudo" que viene de BD (incluye 0.5)
+        try:
+            self.raw_need = float(need) if need is not None else 0.0
+        except (TypeError, ValueError):
+            self.raw_need = 0.0
+
+        # Marcar si es híbrido (EffortRequired = 0.5)
+        self.is_hybrid_05 = abs(self.raw_need - 0.5) < 1e-6
+
+        # El solver trabaja con enteros:
+        # - los 0.5 los tratamos como 1 "slot" cada uno
+        # - los demás se redondean al entero más cercano positivo
+        if self.is_hybrid_05:
             self.need = 1
         else:
-            self.is_hybrid_05 = False
-            self.need = int(math.ceil(self.raw_need))
+            self.need = int(round(self.raw_need)) if self.raw_need > 0 else 0
+
+        # Índice de slot (lo usas más adelante en el solver)
         self.slot_index = 0
         self.shift_type = None
-        # clave de grupo híbrido por franja; se rellena en load_data
-        self.hybrid_key_05 = None
+
+    def __repr__(self):
+        return (f"Demand(id={self.id}, date={self.date}, ws={self.wsname}, "
+                f"{self.start}-{self.end}, raw_need={getattr(self, 'raw_need', '?')}, "
+                f"need={self.need}, hybrid={getattr(self, 'is_hybrid_05', False)})")
 
 # ───────── HELPERS ─────────
 def _end_for_calc(t: time) -> time:
@@ -632,6 +647,9 @@ def recheck_fill_unmet(emps: list['Emp'],
                         st = coverage_stats[dm.id]
                         st["covered"] += 1
                         st["unmet"] = max(0, st["unmet"] - 1)
+                        if "employees" not in st:
+                            st["employees"] = []
+                        st["employees"].append(e)
                         used_any[e.id][day] = _merge_sorted(used_any[e.id].get(day, []) + [(s, e_end)])
                         minutes_by_day[e.id][day] = minutes_by_day[e.id].get(day, 0) + (e_end - s)
                         minutes_by_week[e.id] += (e_end - s)
@@ -663,13 +681,516 @@ def recheck_fill_unmet(emps: list['Emp'],
             if dm.wsid is None:
                 continue
             covered = sum(1 for e2, d2 in sched.get(dm.date, []) if d2.id == dm.id)
+            emps_assigned = [e2 for e2, d2 in sched.get(dm.date, []) if d2.id == dm.id]
             entry = coverage_stats.get(dm.id) or {"demand": dm}
             entry["demand"] = dm
             entry["covered"] = covered
             entry["unmet"] = max(0, dm.need - covered)
             entry["coverage_pct"] = round(covered / dm.need * 100, 1) if dm.need else 100
+            entry["employees"] = emps_assigned
             coverage_stats[dm.id] = entry
 
+
+def apply_hybrid_05_postprocess(
+    emps: list["Emp"],
+    demands: list["Demand"],
+    week: list[date],
+    sched: dict[date, list[tuple["Emp", "Demand"]]],
+    coverage_stats: dict,
+    overrides: dict,
+):
+    """
+    Post-proceso para puestos híbridos (EffortRequired = 0.5).
+    
+    NUEVA LÓGICA:
+    - Agrupa demandas híbridas en BLOQUES CONTINUOS de mínimo 3h y máximo 10h
+    - Prueba TODAS las combinaciones de pares hasta encontrar empleados disponibles
+    """
+
+    logger = logging.getLogger(__name__)
+
+    if not demands:
+        return
+
+    def _tend(t: time) -> time:
+        return t if t != time(0, 0) else time(23, 59)
+
+    def _t2m(t: time) -> int:
+        return t.hour * 60 + t.minute
+
+    # PASO 1: Limpiar asignaciones híbridas previas
+    hybrid_demand_ids = set()
+    for dm in demands:
+        if getattr(dm, "is_hybrid_05", False):
+            hybrid_demand_ids.add(dm.id)
+
+    if hybrid_demand_ids:
+        print(f"[HYB05_POST] Limpiando {len(hybrid_demand_ids)} demandas hibridas pre-asignadas...")
+        for day in list(sched.keys()):
+            sched[day] = [
+                (emp, dm)
+                for (emp, dm) in sched[day]
+                if dm.id not in hybrid_demand_ids
+            ]
+            if not sched[day]:
+                del sched[day]
+        for dm_id in hybrid_demand_ids:
+            if dm_id in coverage_stats:
+                coverage_stats[dm_id]["met"] = 0
+                coverage_stats[dm_id]["unmet"] = coverage_stats[dm_id]["demand"].need
+
+    # PASO 2: Agrupar demandas híbridas por (día, puesto)
+    # Estructura: {(día, puesto): [lista de demandas ordenadas por hora]}
+    from collections import defaultdict
+    demands_by_day_ws: dict[tuple[date, str], list] = defaultdict(list)
+
+    for dm in demands:
+        if not getattr(dm, "is_hybrid_05", False):
+            continue
+        key = (dm.date, dm.wsname)
+        demands_by_day_ws[key].append(dm)
+
+    # Ordenar por hora de inicio
+    for key in demands_by_day_ws:
+        demands_by_day_ws[key].sort(key=lambda d: _t2m(d.start))
+
+    # PASO 3: Identificar bloques continuos de 3-10 horas por día
+    print("========== [HYB05 POST] ==========")
+    print(f"[HYB05_POST] Agrupando demandas híbridas en bloques de 3-10h...")
+
+    # Estructura: {(día, hora_inicio, hora_fin): {puesto: [demandas]}}
+    hybrid_blocks: dict[tuple[date, time, time], dict[str, list]] = {}
+
+    MIN_BLOCK_HOURS = 3
+    MAX_BLOCK_HOURS = 10
+    MIN_BLOCK_MINUTES = MIN_BLOCK_HOURS * 60
+    MAX_BLOCK_MINUTES = MAX_BLOCK_HOURS * 60
+
+    # Por cada día, identificar bloques de demandas continuas
+    days_with_hybrids = set(
+        dm.date for dm in demands if getattr(dm, "is_hybrid_05", False)
+    )
+
+    for day in sorted(days_with_hybrids):
+        # Obtener todos los puestos que tienen híbridos ese día
+        workstations_this_day = set()
+        for (d, ws), dms in demands_by_day_ws.items():
+            if d == day:
+                workstations_this_day.add(ws)
+
+        if len(workstations_this_day) < 2:
+            continue  # Necesitamos al menos 2 puestos para formar híbridos
+
+        # Encontrar rangos de tiempo donde TODOS los puestos se solapan
+        # Primero, obtener todas las horas donde hay demandas
+        all_times = set()
+        for ws in workstations_this_day:
+            for dm in demands_by_day_ws.get((day, ws), []):
+                all_times.add((_t2m(dm.start), _t2m(_tend(dm.end))))
+
+        time_ranges = sorted(all_times)
+        if not time_ranges:
+            continue
+
+        # Agrupar en bloques continuos
+        current_block_start = time_ranges[0][0]
+        current_block_end = time_ranges[0][1]
+
+        for start_min, end_min in time_ranges[1:]:
+            # ¿Es continuo con el bloque actual? (diferencia <= 15 minutos)
+            if start_min - current_block_end <= 15:
+                current_block_end = max(current_block_end, end_min)
+            else:
+                # Terminar bloque actual y empezar uno nuevo
+                block_duration = current_block_end - current_block_start
+                if MIN_BLOCK_MINUTES <= block_duration <= MAX_BLOCK_MINUTES:
+                    # Crear bloque
+                    start_time = time(
+                        current_block_start // 60, current_block_start % 60
+                    )
+                    end_time = time(current_block_end // 60, current_block_end % 60)
+                    block_key = (day, start_time, end_time)
+                    hybrid_blocks[block_key] = {}
+
+                    # Agregar demandas de cada puesto en este rango
+                    for ws in workstations_this_day:
+                        ws_demands_in_block = []
+                        for dm in demands_by_day_ws.get((day, ws), []):
+                            dm_start = _t2m(dm.start)
+                            dm_end = _t2m(_tend(dm.end))
+                            # ¿Esta demanda cae dentro del bloque?
+                            if (
+                                dm_start >= current_block_start
+                                and dm_end <= current_block_end
+                            ):
+                                ws_demands_in_block.append(dm)
+
+                        if ws_demands_in_block:
+                            hybrid_blocks[block_key][ws] = ws_demands_in_block
+
+                # Empezar nuevo bloque
+                current_block_start = start_min
+                current_block_end = end_min
+
+        # No olvidar el último bloque
+        block_duration = current_block_end - current_block_start
+        if MIN_BLOCK_MINUTES <= block_duration <= MAX_BLOCK_MINUTES:
+            start_time = time(current_block_start // 60, current_block_start % 60)
+            end_time = time(current_block_end // 60, current_block_end % 60)
+            block_key = (day, start_time, end_time)
+            hybrid_blocks[block_key] = {}
+            for ws in workstations_this_day:
+                ws_demands_in_block = []
+                for dm in demands_by_day_ws.get((day, ws), []):
+                    dm_start = _t2m(dm.start)
+                    dm_end = _t2m(_tend(dm.end))
+                    if (
+                        dm_start >= current_block_start
+                        and dm_end <= current_block_end
+                    ):
+                        ws_demands_in_block.append(dm)
+                if ws_demands_in_block:
+                    hybrid_blocks[block_key][ws] = ws_demands_in_block
+
+    print(
+        f"[HYB05_POST] Encontrados {len(hybrid_blocks)} bloques de 3-10h con híbridos"
+    )
+
+    if not hybrid_blocks:
+        print("[HYB05_POST] No se encontraron bloques válidos de 3-10h")
+        return
+
+    # PASO 4: Construir uso actual por empleado/día
+    used_by_emp_day: dict[str, dict[date, list[tuple[int, int]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    minutes_by_day: dict[str, dict[date, int]] = defaultdict(lambda: defaultdict(int))
+    minutes_by_week: dict[str, int] = defaultdict(int)
+    days_worked: dict[str, set[date]] = defaultdict(set)
+
+    for day, pairs in sched.items():
+        for emp, dm in pairs:
+            start_min = _t2m(dm.start)
+            end_min = _t2m(_tend(dm.end))
+            used_by_emp_day[emp.id][day].append((start_min, end_min))
+            minutes_by_day[emp.id][day] += end_min - start_min
+            minutes_by_week[emp.id] += end_min - start_min
+            if dm.wsid is not None:
+                days_worked[emp.id].add(day)
+
+    def _merge_sorted(intervals):
+        if not intervals:
+            return []
+        intervals = sorted(intervals)
+        merged = [list(intervals[0])]
+        for s, e in intervals[1:]:
+            if s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        return [(a, b) for a, b in merged]
+
+    for eid in list(used_by_emp_day.keys()):
+        for d in list(used_by_emp_day[eid].keys()):
+            used_by_emp_day[eid][d] = _merge_sorted(used_by_emp_day[eid][d])
+
+    def _fits_daily_caps(emp, day: date, extra_minutes: int) -> bool:
+        """
+        Verifica que el bloque extra no se pase de:
+        - MAX_HOURS_PER_DAY (en horas por día)
+        - MAX_DAYS_PER_WEEK (días trabajados a la semana)
+
+        Usa los acumulados locales minutes_by_day y days_worked.
+        """
+        minutes_today = minutes_by_day[emp.id].get(day, 0)
+
+        # Tope de horas por día
+        if minutes_today + extra_minutes > MAX_HOURS_PER_DAY * 60:
+            return False
+
+        # Tope de días trabajados en la semana
+        days_worked_count = len(days_worked[emp.id])
+        inc_day = 0 if minutes_today > 0 else 1
+        if days_worked_count + inc_day > MAX_DAYS_PER_WEEK:
+            return False
+
+        return True
+
+
+    # Mapa local: nombre de puesto -> ids reales de Workstation
+    wsname_to_ids: dict[str, set] = defaultdict(set)
+    for dm in demands:
+        if dm.wsid is not None:
+            key = (dm.wsname or "").strip().upper()
+            wsname_to_ids[key].add(dm.wsid)
+
+    def _can_cover_ws(emp, wsname: str) -> bool:
+        if not wsname:
+            return False
+        key = wsname.strip().upper()
+
+        # Roles directos por Id (WorkstationId en UserWorkstations)
+        for wsid in wsname_to_ids.get(key, ()):
+            if wsid in emp.roles:
+                return True
+
+        # Fallbacks por nombre (JEFE BARRA -> ENLACE, etc.)
+        fb_list = (
+            ROLE_FALLBACKS_BY_NAME.get(wsname)
+            or ROLE_FALLBACKS_BY_NAME.get(wsname.upper())
+            or []
+        )
+        for fb_name in fb_list:
+            key_fb = fb_name.strip().upper()
+            for wsid in wsname_to_ids.get(key_fb, ()):
+                if wsid in emp.roles:
+                    return True
+        return False
+
+    def _has_overlap(intervals, start_min, end_min):
+        for s, e in intervals:
+            if not (end_min <= s or start_min >= e):
+                return True
+        return False
+
+    total_pairs_assigned = 0
+
+    # PASO 5: Asignar cada bloque probando combinaciones de pares
+    from itertools import combinations
+
+    for (day, start, end), workstations_dict in sorted(hybrid_blocks.items()):
+        block_duration_min = _t2m(end) - _t2m(start)
+        block_duration_hours = block_duration_min / 60
+
+        workstation_names = list(workstations_dict.keys())
+
+        if len(workstation_names) < 2:
+            print(
+                f"[HYB05_POST] Bloque {day} {start}-{end} ({block_duration_hours:.1f}h) solo tiene 1 puesto → omitir"
+            )
+            continue
+
+        print(
+            f"[HYB05_POST] Procesando bloque {day} {start}-{end} "
+            f"({block_duration_hours:.1f}h) con {len(workstation_names)} puestos: "
+            f"{', '.join(workstation_names)}"
+        )
+
+        # Probar todas las combinaciones de pares de puestos
+        all_pairs = list(combinations(workstation_names, 2))
+        assigned_workstations = set()
+
+        for ws_a, ws_b in all_pairs:
+            if ws_a in assigned_workstations or ws_b in assigned_workstations:
+                continue  # Ya usamos uno de estos puestos
+
+            # Obtener todas las demandas de estos puestos en el bloque
+            demands_a = workstations_dict[ws_a]
+            demands_b = workstations_dict[ws_b]
+
+            # Buscar empleado que pueda cubrir AMBOS puestos durante TODO el bloque
+            candidatos = []
+            debug_counts = {
+                "total_emps": len(emps),
+                "no_role_a": 0,
+                "no_role_b": 0,
+                "not_available": 0,
+                "overlap": 0,
+                "caps": 0,
+            }
+
+            start_min = _t2m(start)
+            end_min = _t2m(end)
+
+            for emp in emps:
+                # Verificar roles
+                if not _can_cover_ws(emp, ws_a):
+                    debug_counts["no_role_a"] += 1
+                    continue
+                if not _can_cover_ws(emp, ws_b):
+                    debug_counts["no_role_b"] += 1
+                    continue
+
+                # Disponibilidad general
+                if not emp.available(day, start, end):
+                    debug_counts["not_available"] += 1
+                    continue
+
+                # ===== NUEVA LÓGICA: PRIORIDAD HÍBRIDOS =====
+                # Para híbridos, REASIGNAMOS turnos conflictivos
+                # Calculamos cuántas horas usa FUERA del bloque híbrido
+                intervals = used_by_emp_day[emp.id].get(day, [])
+                has_overlap = _has_overlap(intervals, start_min, end_min)
+                
+                # Calcular minutos que NO se solapan con el bloque híbrido
+                minutes_outside_block = 0
+                for int_start, int_end in intervals:
+                    # Si no hay solapamiento, contar todos los minutos
+                    if int_end <= start_min or int_start >= end_min:
+                        minutes_outside_block += (int_end - int_start)
+                    # Si hay solapamiento parcial, contar solo la parte que no se solapa
+                    else:
+                        if int_start < start_min:
+                            minutes_outside_block += (start_min - int_start)
+                        if int_end > end_min:
+                            minutes_outside_block += (int_end - end_min)
+                
+                if has_overlap:
+                    debug_counts["overlap"] += 1
+                
+                # Verificar límite con las horas recalculadas
+                # (minutos fuera del bloque + el bloque híbrido completo)
+                total_with_hybrid = minutes_outside_block + block_duration_min
+                
+                if total_with_hybrid > MAX_HOURS_PER_DAY * 60:
+                    debug_counts["caps"] += 1
+                    continue
+                
+                # Verificar días trabajados
+                inc_day = 0 if minutes_by_day[emp.id].get(day, 0) > 0 else 1
+                if (len(days_worked[emp.id]) + inc_day) > MAX_DAYS_PER_WEEK:
+                    debug_counts["caps"] += 1
+                    continue
+
+                candidatos.append(
+                    (
+                        minutes_outside_block,  # Priorizar quien tenga menos horas fuera del bloque
+                        minutes_by_week[emp.id],
+                        has_overlap,  # Secundario: preferir sin solapamiento
+                        emp,
+                    )
+                )
+
+            if not candidatos:
+                print(
+                    f"[HYB05_POST] Sin candidato para bloque {day} {start}-{end} "
+                    f"{ws_a} + {ws_b} ({block_duration_hours:.1f}h) | "
+                    f"Rechazos: no_{ws_a}={debug_counts['no_role_a']}, "
+                    f"no_{ws_b}={debug_counts['no_role_b']}, "
+                    f"no_disponible={debug_counts['not_available']}, "
+                    f"solapamiento={debug_counts['overlap']}, "
+                    f"limite_horas={debug_counts['caps']}"
+                )
+                continue
+
+            # ¡Encontramos candidatos!
+            candidatos.sort(key=lambda x: (x[0], x[1], x[2]))  # minutos_fuera, semana, tiene_overlap
+            minutes_outside, _, had_overlap, chosen = candidatos[0]
+            
+            if had_overlap:
+                print(f"[HYB05_POST] ⚠️  {chosen.name} tenía solapamiento, reasignando turnos...")
+
+            # Antes de asignar el bloque híbrido, liberamos al empleado
+            # de cualquier turno normal que se solape con [start, end]
+            sched_day = sched.get(day, [])
+            if sched_day:
+                new_sched_day = []
+                removed_for_chosen: list["Demand"] = []
+                for emp2, dm2 in sched_day:
+                    if emp2.id == chosen.id:
+                        dm2_start = _t2m(dm2.start)
+                        dm2_end = _t2m(_tend(dm2.end))
+                        if not (dm2_end <= start_min or dm2_start >= end_min):
+                            # Se solapa: eliminamos esta asignación previa
+                            removed_for_chosen.append(dm2)
+                            if dm2.id in coverage_stats:
+                                cov = coverage_stats[dm2.id]
+                                cov["met"] = max(0, cov.get("met", 0) - 1)
+                                cov["unmet"] = cov.get("unmet", 0) + 1
+                            continue
+                    new_sched_day.append((emp2, dm2))
+                sched[day] = new_sched_day
+
+                # Recalcular minutos/intervalos para el empleado elegido ese día
+                new_intervals = []
+                for emp2, dm2 in new_sched_day:
+                    if emp2.id == chosen.id:
+                        s2 = _t2m(dm2.start)
+                        e2 = _t2m(_tend(dm2.end))
+                        new_intervals.append((s2, e2))
+                used_by_emp_day[chosen.id][day] = _merge_sorted(new_intervals)
+                minutes_by_day[chosen.id][day] = sum(
+                    e2 - s2 for s2, e2 in used_by_emp_day[chosen.id][day]
+                )
+                # Recalcular minutos semanales y días trabajados del elegido
+                total_week_minutes = 0
+                days_set: set[date] = set()
+                for d2, ivals in used_by_emp_day[chosen.id].items():
+                    if ivals:
+                        days_set.add(d2)
+                        for s2, e2 in ivals:
+                            total_week_minutes += e2 - s2
+                minutes_by_week[chosen.id] = total_week_minutes
+                days_worked[chosen.id] = days_set
+
+            # Asignar TODAS las demandas de ambos puestos en el bloque
+            for dm in demands_a + demands_b:
+                sched.setdefault(day, []).append((chosen, dm))
+
+                # Actualizar coverage
+                entry = coverage_stats.get(dm.id)
+                if entry is None:
+                    entry = {
+                        "demand": dm,
+                        "met": 0,
+                        "unmet": dm.need,
+                        "covered": 0,
+                        "employees": [],
+                    }
+                    coverage_stats[dm.id] = entry
+                
+                # Asegurar que la estructura tenga todas las claves necesarias
+                if "employees" not in entry:
+                    entry["employees"] = []
+                if "met" not in entry:
+                    entry["met"] = 0
+                if "covered" not in entry:
+                    entry["covered"] = 0
+                if "unmet" not in entry:
+                    entry["unmet"] = dm.need
+                
+                # Actualizar contadores
+                entry["met"] = min(entry.get("met", 0) + 1, dm.need)
+                entry["covered"] = entry["met"]
+                entry["unmet"] = max(0, dm.need - entry["met"])
+                entry["employees"].append(chosen)
+
+            # Actualizar uso del empleado
+            used_by_emp_day[chosen.id][day] = _merge_sorted(
+                used_by_emp_day[chosen.id][day] + [(start_min, end_min)]
+            )
+            minutes_by_day[chosen.id][day] += block_duration_min
+            minutes_by_week[chosen.id] += block_duration_min
+            days_worked[chosen.id].add(day)
+
+            # Marcar puestos como asignados
+            assigned_workstations.add(ws_a)
+            assigned_workstations.add(ws_b)
+
+            total_pairs_assigned += 1
+            
+            # Log mejorado con información de reasignación
+            if had_overlap:
+                removed_count = len([dm for emp2, dm in sched_day if emp2.id == chosen.id 
+                                    and not (sched_day and (emp2, dm) in sched.get(day, []))])
+                print(
+                    f"[HYB05_POST] ✓ Asignado BLOQUE híbrido {day} {start}-{end} ({block_duration_hours:.1f}h) "
+                    f"{ws_a} + {ws_b} a {chosen.name} "
+                    f"({len(demands_a)} + {len(demands_b)} = {len(demands_a) + len(demands_b)} demandas) "
+                    f"[REASIGNÓ: liberó turnos conflictivos]"
+                )
+            else:
+                print(
+                    f"[HYB05_POST] ✓ Asignado BLOQUE híbrido {day} {start}-{end} ({block_duration_hours:.1f}h) "
+                    f"{ws_a} + {ws_b} a {chosen.name} "
+                    f"({len(demands_a)} + {len(demands_b)} = {len(demands_a) + len(demands_b)} demandas)"
+                )
+            logger.info(
+                "[HYB05_POST] Assigned hybrid block %s %s-%s (%.1fh) %s+%s to %s",
+                day, start, end, block_duration_hours, ws_a, ws_b, chosen.name
+            )
+
+    print(f"[HYB05_POST] total_bloques_asignados={total_pairs_assigned}")
 
 
 def add_shifttype_must_cover_if_possible(mdl, emps, dem, X, overrides):
@@ -832,35 +1353,78 @@ def fetchall(cur, sql, pars=None):
         raise DataIntegrityError(str(e))
 
 # ───────── DEMAND PROCESSING ─────────
-def split_long_segment(d: date, wsid, wsname, s_min: int, e_min: int, need: int, max_hours: int):
+def split_long_segment(d: date, wsid, wsname, s_min: int, e_min: int, need: int, max_hours: int, raw_need=None):
+    """
+    Corta [s_min, e_min) en trozos de como máximo max_hours horas,
+    pero conservando el EffortRequired original (raw_need) cuando exista.
+    Eso evita perder los 0.5 de los puestos híbridos.
+    """
     out = []
     limit = max_hours * 60
     cur = s_min
+
+    # Si nos pasan raw_need (por ejemplo 0.5), lo usamos; si no, usamos need.
+    eff = need if raw_need is None else raw_need
+
     while cur < e_min:
         nxt = min(cur + limit, e_min)
-        out.append(Demand((uid(), d, wsid, wsname, _m2t(cur), _m2t(nxt if nxt < 24*60 else 0), need)))
+        out.append(
+            Demand(
+                (
+                    uid(),
+                    d,
+                    wsid,
+                    wsname,
+                    _m2t(cur),
+                    _m2t(nxt if nxt < 24 * 60 else 0),
+                    eff,
+                )
+            )
+        )
         cur = nxt
     return out
 
+
 def coalesce_demands(demands, tolerate_gap_min: int = 0):
     by_key = defaultdict(list)
-    for d in demands: by_key[(d.date, d.wsid, d.wsname)].append(d)
+    for d in demands:
+        by_key[(d.date, d.wsid, d.wsname)].append(d)
+
     merged = []
     for (dte, wsid, wsname), items in by_key.items():
         items.sort(key=lambda x: (_t2m(x.start), _t2m(x.end)))
-        if not items: continue
+        if not items:
+            continue
         curr = items[0]
         for nxt in items[1:]:
             pot_dur_min = _t2m(nxt.end if nxt.end != time(0,0) else time(23,59)) - _t2m(curr.start)
             pot_dur_h = pot_dur_min / 60.0
-            if (nxt.need == curr.need
+            if (
+                nxt.need == curr.need
                 and _t2m(nxt.start) - _t2m(curr.end) <= tolerate_gap_min
-                and pot_dur_h <= MAX_HOURS_PER_DAY):
+                and pot_dur_h <= MAX_HOURS_PER_DAY
+            ):
                 curr.end = nxt.end
             else:
-                merged.append(curr); curr = nxt
+                merged.append(curr)
+                curr = nxt
         merged.append(curr)
-    return [Demand((d.id, d.date, d.wsid, d.wsname, d.start, d.end, d.need)) for d in merged]
+
+    # 👇 OJO: usamos raw_need si existe, para NO perder las 0,5
+    return [
+        Demand(
+            (
+                d.id,
+                d.date,
+                d.wsid,
+                d.wsname,
+                d.start,
+                d.end,
+                getattr(d, "raw_need", d.need),
+            )
+        )
+        for d in merged
+    ]
 
 def normalize_by_max_need_profile(demands):
     if not ENFORCE_PEAK_CAP: return demands
@@ -942,7 +1506,16 @@ def normalize_with_extra_cuts(demands: List[Demand], extra_cuts_by_date: Dict[da
         for i in range(len(points)-1):
             a, b = points[i], points[i+1]
             if b - a <= 0: continue
-            segs = split_long_segment(dm.date, dm.wsid, dm.wsname, a, b, dm.need, max_hours)
+            segs = split_long_segment(
+                dm.date,
+                dm.wsid,
+                dm.wsname,
+                a,
+                b,
+                dm.need,
+                max_hours,
+                getattr(dm, "raw_need", dm.need),
+            )
             out.extend(segs)
     return out
 
@@ -1504,44 +2077,6 @@ def load_data(week_start: date):
             raise DataNotFoundError("Ningún empleado tiene roles asignados")
 
         emps = [emps_map[k] for k in sorted(emps_map.keys())]
-        # --- CONFIG HÍBRIDA 0.5 ---
-        # 1) Leer grupos desde "Management"."HybridWorkstations" (A/B/C)
-        hybrid_rows = fetchall(cur, '''
-            WITH hw AS (
-                SELECT "Id" AS group_id, "WorkstationAId" AS wsid
-                FROM "Management"."HybridWorkstations" WHERE COALESCE("IsDeleted", FALSE)=FALSE
-                UNION ALL
-                SELECT "Id", "WorkstationBId"
-                FROM "Management"."HybridWorkstations" WHERE COALESCE("IsDeleted", FALSE)=FALSE
-                UNION ALL
-                SELECT "Id", "WorkstationCId"
-                FROM "Management"."HybridWorkstations"
-                WHERE COALESCE("IsDeleted", FALSE)=FALSE AND "WorkstationCId" IS NOT NULL
-            )
-            SELECT group_id, wsid FROM hw WHERE wsid IS NOT NULL ORDER BY group_id, wsid
-        ''')
-
-        from collections import defaultdict as _dd
-        hybrid_groups = _dd(set)     # group_id -> {wsid,}
-        for grp, wsid in hybrid_rows:
-            hybrid_groups[grp].add(wsid)
-
-        # 2) Etiquetar cada demanda 0,5 con su grupo (si su WS pertenece a alguno)
-        for dm in demands:
-            if getattr(dm, "is_hybrid_05", False):
-                for grp, wsids in hybrid_groups.items():
-                    if dm.wsid in wsids:
-                        dm.hybrid_group_05 = grp
-                        break
-
-        # 3) Elegibilidad de empleados: grupos en los que el empleado posee >=2 WS
-        for e in emps:
-            ws_owned = set(getattr(e, "roles", []))
-            e.hybrid_groups_05 = set()
-            for grp, wsids in hybrid_groups.items():
-                if len(ws_owned.intersection(wsids)) >= 2:
-                    e.hybrid_groups_05.add(grp)
-        # --- /CONFIG HÍBRIDA 0.5 ---
 
         # === 2.a) AUSENTISMOS (HARD BLOCK)
         for uid_abs, sd_abs, ed_abs in fetchall(
@@ -1571,31 +2106,6 @@ def load_data(week_start: date):
             cnt_abs = sum(1 for e in emps_map.values() if any(d in week for d in e.absent))
             if cnt_abs:
                 print(f"[ABSENTEEISMS] Empleados con ausentismos en semana: {cnt_abs}")
-        # --- HÍBRIDO 0.5: indexar demandas 0,5 por franja y marcar elegibilidad por empleado ---
-        from collections import defaultdict as _dd
-
-        # 2.1) Indexar demandas 0,5 por (fecha, inicio, fin)
-        hyb_by_slot = _dd(list)    # (date, start, end) -> [Demand...]
-        ws_by_slot  = _dd(set)     # (date, start, end) -> {wsname,...}
-
-        for dm in demands:
-            if getattr(dm, "is_hybrid_05", False):
-                key = (dm.date, dm.start, dm.end)
-                dm.hybrid_key_05 = key
-                hyb_by_slot[key].append(dm)
-                if dm.wsname:
-                    ws_by_slot[key].add((dm.wsname or "").strip().upper())
-
-        # 2.2) Para cada empleado, qué franjas híbridas puede tomar (≥2 WS de esa franja)
-        for e in emps:
-            e.hybrid_groups_05 = set()
-            roles_upper = {(r or "").strip().upper() for r in getattr(e, "roles", set())}
-            for key, ws_set in ws_by_slot.items():
-                # ¿cuántos WS de esa franja puede cubrir el empleado?
-                cnt = sum(1 for ws in ws_set if (ws in roles_upper))
-                if cnt >= 2 and len(ws_set) >= 2 and len(hyb_by_slot[key]) >= 2:
-                    e.hybrid_groups_05.add(key)
-
 
         # Fallbacks de roles por nombre (expansión)
         name2id = {}
@@ -3100,12 +3610,6 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
 
             if not e.can(d.wsid):
                 continue
-            # Si es una demanda 0,5, solo crear variable si el empleado pertenece al grupo con >=2 WS
-            if getattr(d, "is_hybrid_05", False):
-                grp = getattr(d, "hybrid_group_05", None)
-                if not grp or grp not in getattr(e, "hybrid_groups_05", set()):
-                    continue  # no crear X[e,d]
-
 
             free_today = (e.id, d.date) in overrides
             two_starts_today = (dow in getattr(e, "us_two_starts_dow", set()))  # ← FIX NameError
@@ -3141,11 +3645,6 @@ def build_variables_with_usershift_logic(mdl, emps, dem, overrides: Set[Tuple[st
                 if ASCII_LOGS and two_starts_today and st_wins:
                     print(f"[ST-BYPASS-2STARTS] {e.name} {d.date.isoformat()} DOW={dow} → "
                           f"permitimos dentro de US aunque no haya ventana ST")
-            # Si es un 0,5: solo crear variable si el empleado puede tomar al menos 2 de la franja
-            if getattr(d, "is_hybrid_05", False):
-                key = getattr(d, "hybrid_key_05", None)
-                if (not key) or (key not in getattr(e, "hybrid_groups_05", set())):
-                    continue
 
             X[e.id, d.id] = mdl.NewBoolVar(f"x_{e.id}_{d.id}")
 
@@ -3284,8 +3783,14 @@ def solve(emps: List[Emp], dem: List[Demand], week: List[date],
 
 
 # ───────── SOLVER FLEXIBLE ─────────
-def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date],
-                   overrides: Set[Tuple[str, date]], min_hours_required: int = 0):
+# ───────── SOLVER FLEXIBLE ─────────
+def solve_flexible(
+    emps: List[Emp],
+    dem: List[Demand],
+    week: List[date],
+    overrides: Set[Tuple[str, date]],
+    min_hours_required: int = 0
+):
     """Solver en dos fases; nunca infactible. Devuelve (schedule, coverage_stats, days_off_diag)."""
     usershift_emps, other_emps = [], []
     for e in emps:
@@ -3300,29 +3805,46 @@ def solve_flexible(emps: List[Emp], dem: List[Demand], week: List[date],
         print(f"[SOLVER] Fase 2 (complemento): {len(other_emps)} empleados")
 
     try:
+        # ----- Fase CP-SAT -----
         sched_p1, cov_p1, remaining, diag1 = _solve_with_employees(
-            usershift_emps if usershift_emps else emps, dem, week, overrides, min_hours_required
+            usershift_emps if usershift_emps else emps,
+            dem,
+            week,
+            overrides,
+            min_hours_required,
         )
+
         if remaining:
             if ASCII_LOGS:
                 print(f"[SOLVER] Fase 2: {len(remaining)} demandas restantes")
-            sched_p2, cov_p2, _, diag2 = _solve_with_employees(emps, remaining, week, overrides, min_hours_required)
-            # Combinar
+            sched_p2, cov_p2, _, diag2 = _solve_with_employees(
+                emps,
+                remaining,
+                week,
+                overrides,
+                min_hours_required,
+            )
+
+            # Combinar fase 1 + fase 2
             final_sched = defaultdict(list)
             for day, assigns in sched_p1.items():
                 final_sched[day].extend(assigns)
             for day, assigns in sched_p2.items():
                 final_sched[day].extend(assigns)
+
             final_cov = {**cov_p1, **cov_p2}
             final_diag = (diag1 or []) + (diag2 or [])
             return final_sched, final_cov, final_diag
         else:
             return sched_p1, cov_p1, (diag1 or [])
-    except ScheduleGenerationError:
-        # Fallback GREEDY
-        sched, coverage_stats = greedy_fallback(emps, dem, week, overrides)
-        return sched, coverage_stats, []  # greedy no calcula ese diagnóstico
 
+    except ScheduleGenerationError as e:
+        # ----- Fallback GREEDY -----
+        if ASCII_LOGS:
+            print(f"[SOLVER] Fallback GREEDY por error en CP-SAT: {e}")
+        sched, coverage_stats = greedy_fallback(emps, dem, week, overrides)
+        # greedy no calcula days_off_diag
+        return sched, coverage_stats, []
 
 def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[date],overrides: Set[Tuple[str, date]],min_hours_required: int = 0):
     """Resuelve con un subconjunto de empleados. Devuelve (schedule, coverage_stats, remaining_demands, days_off_diag)."""
@@ -3349,47 +3871,7 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
     for d in dem:
         covered = sum(X[e.id, d.id] for e in emps_subset if (e.id, d.id) in X)
         mdl.Add(covered + unmet[d.id] == d.need)
-    # --- HÍBRIDO 0.5: misma franja+grupo => 0 o 2 plazas por empleado ---
-    from collections import defaultdict as _dd2
-    hybrid_slots = _dd2(list)  # (date, start, end, group) -> [Demand]
-
-    for d in dem:
-        if getattr(d, "is_hybrid_05", False) and getattr(d, "hybrid_group_05", None):
-            key = (d.date, d.start, d.end, d.hybrid_group_05)
-            hybrid_slots[key].append(d)
-
-    for (dt, s, e_time, grp), dlist in hybrid_slots.items():
-        # Si solo hay 1 demanda 0,5 en esa franja/grupo, nadie puede tomarla
-        if len(dlist) == 1:
-            d0 = dlist[0]
-            for emp in emps_subset:
-                if (emp.id, d0.id) in X:
-                    mdl.Add(X[emp.id, d0.id] == 0)
-            continue
-
-        # Hay 2+ demandas 0,5 en la misma franja/grupo
-        for emp in emps_subset:
-            if grp not in getattr(emp, "hybrid_groups_05", set()):
-                for dd in dlist:
-                    if (emp.id, dd.id) in X:
-                        mdl.Add(X[emp.id, dd.id] == 0)
-                continue
-
-            vars_emp = [X[emp.id, dd.id] for dd in dlist if (emp.id, dd.id) in X]
-            if not vars_emp:
-                continue
-            if len(vars_emp) < 2:
-                for v in vars_emp:
-                    mdl.Add(v == 0)
-                continue
-
-            cnt = mdl.NewIntVar(0, len(vars_emp),
-                                f"hyb05_cnt_{emp.id}_{dt.isoformat()}_{s.strftime('%H%M')}_{grp}")
-            mdl.Add(cnt == sum(vars_emp))
-            mdl.AddAllowedAssignments([cnt], [(0,), (2,)])   # exactamente 0 o 2
-    # --- /HÍBRIDO 0.5 ---
-
-    # ── RESTRICCIÓN (con slack) para priorizar RESTRINGIDOS sobre LIBRES en cada segmento ──
+        # ── RESTRICCIÓN (con slack) para priorizar RESTRINGIDOS sobre LIBRES en cada segmento ──
     # Si hay R candidatos restringidos para el segmento, pedimos usar hasta min(need, R).
     # Si el modelo usa menos restringidos de los posibles, aparece un slack penalizado en el objetivo.
     restricted_shortfall_terms = []
@@ -3409,40 +3891,19 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
 
 
     # No solapes mismo empleado/mismo día
-    def _coassignable(d1, d2):
-        return (getattr(d1, "is_hybrid_05", False)
-                and getattr(d2, "is_hybrid_05", False)
-                and getattr(d1, "hybrid_group_05", None)
-                and d1.hybrid_group_05 == getattr(d2, "hybrid_group_05", None)
-                and d1.start == d2.start
-                and d1.end == d2.end)
-
     by_day = defaultdict(list)
     for d in dem:
         by_day[d.date].append(d)
-
     for day in sorted(by_day.keys()):
         lst = sorted(by_day[day], key=lambda z: (_t2m(z.start), _t2m(z.end)))
         for i in range(len(lst)):
             for j in range(i+1, len(lst)):
-                if overlap(lst[i], lst[j]) and not _coassignable(lst[i], lst[j]):
+                if overlap(lst[i], lst[j]):
                     for e in emps_subset:
                         if (e.id, lst[i].id) in X and (e.id, lst[j].id) in X:
                             mdl.Add(X[e.id, lst[i].id] + X[e.id, lst[j].id] <= 1)
-        # --- MÍNIMO DIARIO DURO ---
-        min_daily = MIN_SHIFT_DURATION_HOURS * 60
-        for e in emps_subset:
-            for dday in week:
-                todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
-                if not todays:
-                    continue
-                y_work = mdl.NewBoolVar(f"y_work_{e.id}_{dday.isoformat()}")
-                mdl.Add(sum(X[e.id, dm.id] for dm in todays) >= 1).OnlyEnforceIf(y_work)
-                mdl.Add(sum(X[e.id, dm.id] for dm in todays) == 0).OnlyEnforceIf(y_work.Not())
-                mdl.Add(sum(duration_min(dm) * X[e.id, dm.id] for dm in todays) >= min_daily).OnlyEnforceIf(y_work)
-        # --- /MÍNIMO DIARIO DURO ---
 
-    # Máx. h/día
+    # Máx. 9h/día
     for e in emps_subset:
         for dday in week:
             todays = [dm for dm in dem if dm.date == dday and (e.id, dm.id) in X]
@@ -3552,54 +4013,6 @@ def _solve_with_employees(emps_subset: List[Emp],dem: List[Demand],week: List[da
         for e in emps_subset:
             if (e.id, d.id) in X and sol.Value(X[e.id, d.id]):
                 out[d.date].append((e, d))
-    # --- REGLA HÍBRIDA 0.5: por franja y empleado, contar 0 o 2 ---
-    hybrid_slots = defaultdict(list)  # (date, start, end) -> [Demand...]
-    for dseg in dem:
-        if getattr(dseg, "is_hybrid_05", False) and getattr(dseg, "hybrid_key_05", None):
-            hybrid_slots[dseg.hybrid_key_05].append(dseg)
-
-    for key, dlist in hybrid_slots.items():
-        if len(dlist) < 2:
-            # con 1 sola 0,5 en franja no se puede asignar a nadie
-            for emp in emps_subset:
-                for d0 in dlist:
-                    if (emp.id, d0.id) in X:
-                        mdl.Add(X[emp.id, d0.id] == 0)
-            continue
-
-        for emp in emps_subset:
-            vars_emp = [X[emp.id, d.id] for d in dlist if (emp.id, d.id) in X]
-            if not vars_emp:
-                continue
-            # Exactamente 0 o 2 (si hay más de 2 slots en la franja, seguimos obligando a tomar 2 máximo)
-            cnt = mdl.NewIntVar(0, 2, f"hyb05_cnt_{emp.id}_{key[0].isoformat()}_{key[1].strftime('%H%M')}")
-            mdl.Add(cnt == sum(vars_emp))
-            mdl.AddAllowedAssignments([cnt], [(0,), (2,)])
-        if ASCII_LOGS:
-            from collections import defaultdict as _dd
-            print("\n[HYB-0.5] Asignaciones híbridas (0.5)")
-
-            minutes_by_emp_day = _dd(int)
-            any_hyb = False
-
-            for day in sorted(out.keys()):
-                for emp, dm in out[day]:
-                    minutes_by_emp_day[(emp.id, emp.name, day)] += duration_min(dm)
-                    if getattr(dm, "is_hybrid_05", False):
-                        any_hyb = True
-                        print(f"[HYB-0.5] {day} {dm.start.strftime('%H:%M')}-{dm.end.strftime('%H:%M')} "
-                            f"WS={dm.wsname} -> {emp.name}")
-
-            if not any_hyb:
-                print("[HYB-0.5] (sin asignaciones híbridas en esta ejecución)")
-
-            print("\n[HOURS] Minutos por empleado y día")
-            min_daily = MIN_SHIFT_DURATION_HOURS * 60
-            for (eid, ename, day), mins in sorted(minutes_by_emp_day.items(), key=lambda x: (x[0][2], x[0][1])):
-                warn = ""
-                if 0 < mins < min_daily:
-                    warn = f"  << BELOW DAILY MIN ({mins} < {min_daily} min)"
-                print(f"[HOURS] {day} {ename}: {mins} min ({mins/60.0:.2f} h){warn}")
 
     days_off_diag = build_days_off_diagnostics(sol, meta_days_off, emps_subset, dem)
     return out, coverage_stats, remaining_demands, days_off_diag
@@ -4282,6 +4695,29 @@ def generate(week_start: date):
     overrides, usershift_plan = plan_usershift_day_modes(emps, demands, week)
     sched, relaxed_groups, days_off_diag = solve(emps, demands, week, overrides, min_hours_required)
 
+    # ===== NUEVO: POST-PROCESO HÍBRIDO 0.5 =====
+    # Construir coverage_stats para el post-proceso
+    coverage_stats = {}
+    for dm in demands:
+        covered = sum(1 for e2, d2 in sched.get(dm.date, []) if d2.id == dm.id)
+        coverage_stats[dm.id] = {
+            "demand": dm,
+            "met": covered,
+            "unmet": max(0, dm.need - covered),
+            "covered": covered,
+            "coverage_pct": round((covered / dm.need) * 100, 1) if dm.need > 0 else 100,
+            "employees": []
+        }
+    
+    apply_hybrid_05_postprocess(
+        emps=emps,
+        demands=demands,
+        week=week,
+        sched=sched,
+        coverage_stats=coverage_stats,
+        overrides=overrides,
+    )
+    # ===== FIN POST-PROCESO HÍBRIDO =====
 
     for d, lst in fixed.items(): sched[d].extend(lst)
     fixed_ids = {(e.id, dm.id) for lst in fixed.values() for e, dm in lst}
@@ -4397,6 +4833,19 @@ def generate_flexible(week_start: date):
         sched, coverage_stats = greedy_fallback(emps, demands, week, overrides)
         solved_by = "greedy_fallback"
         days_off_diag = []
+    
+    # 1.bis) POST-PROCESO HÍBRIDO 0,5
+    # Aquí SÍ se ejecuta siempre, con el horario final (CP-SAT o greedy),
+    # y respeta todas las restricciones previas, relajando solapamiento solo para parejas 0,5 válidas.
+    apply_hybrid_05_postprocess(
+        emps=emps,
+        demands=demands,
+        week=week,
+        sched=sched,
+        coverage_stats=coverage_stats,
+        overrides=overrides,
+    )
+
      
 
     for emp in emps:
@@ -4798,7 +5247,33 @@ def preview():
         return jsonify(res), 200
     except (DatabaseConnectionError, DataNotFoundError) as e:
         return jsonify({"error": str(e)}), 400
-
+def cleanup_null_workstation_schedules(cur, week_start: date, week_end: date) -> int:
+    """
+    Elimina todos los registros de la tabla Schedules donde WorkstationId es NULL
+    para el rango de fechas especificado.
+    
+    Args:
+        cur: Cursor de la conexión a la base de datos
+        week_start: Fecha de inicio de la semana
+        week_end: Fecha de fin de la semana
+    
+    Returns:
+        int: Número de registros eliminados
+    """
+    cur.execute(
+        '''
+        DELETE FROM "Management"."Schedules"
+        WHERE "Date" BETWEEN %s AND %s
+          AND "WorkstationId" IS NULL
+        ''',
+        (week_start, week_end),
+    )
+    deleted_count = cur.rowcount
+    
+    if ASCII_LOGS and deleted_count > 0:
+        print(f"[CLEANUP] Eliminados {deleted_count} registros con WorkstationId NULL")
+    
+    return deleted_count
 @app.route('/api/agenda/save', methods=['POST'])
 def save():
     data = request.get_json() or {}
@@ -4910,32 +5385,62 @@ def save():
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
-                # --- CAP de 9h/día por empleado ---
+                # --- CAP de 10h/día por empleado (sin duplicar híbridos) ---
                 DAILY_CAP_MIN = MAX_HOURS_PER_DAY * 60
-                remaining_quota = {}
-                for (eid0, _wsid0), _rows0 in coalesced.items():
-                    remaining_quota.setdefault(eid0, DAILY_CAP_MIN)
-
+                
+                # Pre-calcular minutos REALES por empleado (sin duplicar híbridos)
+                real_minutes_by_emp = {}
+                for (eid0, wsid0), _rows0 in coalesced.items():
+                    if eid0 not in real_minutes_by_emp:
+                        real_minutes_by_emp[eid0] = []
+                    for emp0, s0, e0, src0 in _rows0:
+                        real_minutes_by_emp[eid0].append((s0, e0, wsid0))
+                
+                # Para cada empleado, fusionar intervalos solapados (híbridos)
+                # para calcular el tiempo REAL trabajado
+                actual_worked_minutes = {}
+                for eid, intervals in real_minutes_by_emp.items():
+                    # Fusionar intervalos solapados
+                    if not intervals:
+                        actual_worked_minutes[eid] = 0
+                        continue
+                    sorted_ivs = sorted(intervals, key=lambda x: (x[0], x[1]))
+                    merged = [[sorted_ivs[0][0], sorted_ivs[0][1]]]
+                    for s, e, _ in sorted_ivs[1:]:
+                        if s <= merged[-1][1]:  # Solapado o contiguo
+                            merged[-1][1] = max(merged[-1][1], e)
+                        else:
+                            merged.append([s, e])
+                    actual_worked_minutes[eid] = sum(e - s for s, e in merged)
+                
+                # Aplicar CAP solo si excede el límite REAL
+                remaining_quota = {eid: DAILY_CAP_MIN for eid in real_minutes_by_emp.keys()}
+                
                 for (eid0, wsid0), _rows0 in list(coalesced.items()):
                     new_rows = []
                     for emp0, s0, e0, src0 in _rows0:
-                        quota = remaining_quota.get(eid0, DAILY_CAP_MIN)
-                        if quota <= 0:
-                            continue
-                        seg = e0 - s0
-                        use = seg if seg <= quota else quota
-                        ns, ne = s0, s0 + use
-                        remaining_quota[eid0] = quota - use
-                        if (ne - ns) >= MIN_SEGMENT_MINUTES:
-                            if ASCII_LOGS and use < seg:
-                                print(
-                                    f"[SAVE-CAP9H] Recorte {emp0.name} {d} ws={wsid0}: "
-                                    f"{_m2t(s0).strftime('%H:%M')}-{_m2t(e0 if e0 < 24*60 else 0).strftime('%H:%M')}"
-                                    f" → {_m2t(ns).strftime('%H:%M')}-{_m2t(ne if ne < 24*60 else 0).strftime('%H:%M')}"
-                                )
-                            new_rows.append((emp0, ns, ne, src0))
+                        # Si el tiempo REAL del empleado está dentro del CAP, aceptar todos sus turnos
+                        if actual_worked_minutes.get(eid0, 0) <= DAILY_CAP_MIN:
+                            new_rows.append((emp0, s0, e0, src0))
+                        else:
+                            # Solo si excede, aplicar recorte (caso raro)
+                            quota = remaining_quota.get(eid0, DAILY_CAP_MIN)
+                            if quota <= 0:
+                                continue
+                            seg = e0 - s0
+                            use = seg if seg <= quota else quota
+                            ns, ne = s0, s0 + use
+                            remaining_quota[eid0] = quota - use
+                            if (ne - ns) >= MIN_SEGMENT_MINUTES:
+                                if ASCII_LOGS and use < seg:
+                                    print(
+                                        f"[SAVE-CAP10H] Recorte {emp0.name} {d} ws={wsid0}: "
+                                        f"{_m2t(s0).strftime('%H:%M')}-{_m2t(e0 if e0 < 24*60 else 0).strftime('%H:%M')}"
+                                        f" → {_m2t(ns).strftime('%H:%M')}-{_m2t(ne if ne < 24*60 else 0).strftime('%H:%M')}"
+                                    )
+                                new_rows.append((emp0, ns, ne, src0))
                     coalesced[(eid0, wsid0)] = new_rows
-                # --- fin CAP 9h ---
+                # --- fin CAP 10h ---
 
                 day_key = d.isoformat()
                 latest_end_by_wsid_min = latest_map_all_by_wsid.get(day_key, {}) or {}
@@ -5010,6 +5515,7 @@ def save():
                                 now(),
                             ),
                         )
+            cleanup_null_workstation_schedules(cur, ws, we)
             c.commit()
     except Exception as e:
         return jsonify(
