@@ -5385,6 +5385,31 @@ def save():
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
+                               
+
+                # --- FILTRO: Eliminar bloques coalescidos menores a MIN_SHIFT_DURATION_HOURS ---
+                MIN_BLOCK_SAVE_MIN = MIN_SHIFT_DURATION_HOURS * 60  # 3h = 180 min
+
+                for (eid_filt, wsid_filt), rows_filt in list(coalesced.items()):
+                    if wsid_filt is None:
+                        continue  # No filtrar ausencias
+                    
+                    filtered_rows = []
+                    for emp_f, s_min_f, e_min_f, src_dms_f in rows_filt:
+                        dur_min_f = e_min_f - s_min_f
+                        if dur_min_f >= MIN_BLOCK_SAVE_MIN:
+                            filtered_rows.append((emp_f, s_min_f, e_min_f, src_dms_f))
+                        elif ASCII_LOGS:
+                            print(f"[SAVE-MIN-BLOCK] Bloque <{MIN_SHIFT_DURATION_HOURS}h omitido: "
+                                f"{emp_f.name} {d} wsid={wsid_filt} "
+                                f"{_m2t(s_min_f).strftime('%H:%M')}-{_m2t(e_min_f if e_min_f < 24*60 else 0).strftime('%H:%M')} "
+                                f"({dur_min_f}min)")
+                    
+                    coalesced[(eid_filt, wsid_filt)] = filtered_rows
+                # --- FIN FILTRO ---
+
+
+
                 # --- CAP de 10h/día por empleado (sin duplicar híbridos) ---
                 DAILY_CAP_MIN = MAX_HOURS_PER_DAY * 60
                 
