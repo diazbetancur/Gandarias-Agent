@@ -2,10 +2,12 @@ version: '3.9'
 
 services:
   api:
-    build: .
-    container_name: gandarias-agenda-api
+    build:
+      context: .
+      dockerfile: Dockerfile.lambda
+    container_name: gandarias-lambda
     ports:
-      - '5000:5000'
+      - '9000:8080'
     environment:
       DB_HOST: database-gandarias.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com
       DB_PORT: 5432
@@ -14,5 +16,3 @@ services:
       DB_PASSWORD: MyStrongPassword!123_
       DB_SSLMODE: require
     restart: unless-stopped
-
-    tty: true

@@ -7,8 +7,7 @@ COPY requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
 # Copiar el código de tu aplicación
-COPY agenda.py ${LAMBDA_TASK_ROOT}/
-COPY handler.py ${LAMBDA_TASK_ROOT}/
+COPY . ${LAMBDA_TASK_ROOT}/
 
 # Establecer el handler
 CMD ["handler.handler"]
