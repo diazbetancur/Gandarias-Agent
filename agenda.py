@@ -5397,7 +5397,7 @@ def save():
                 svc = ExplicadorHuecosService(cur, table_name=gaps_table)
 
                 # Si tu svc ya soporta token, pásalo; si no, igual funciona sin token dentro del payload.
-                explicaciones = svc.generar_y_guardar(res, ctx, usuario_id=usuario_id, token=token)
+                explicaciones = svc.generar_y_guardar(res, ctx,  token=token)
                 inserted_gaps = len(explicaciones) if explicaciones else 0
 
                 print(f"[HU1.1][DB] inserted={inserted_gaps} into {gaps_table} token={token}")
