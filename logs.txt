@@ -7359,3 +7359,5 @@ APOYO ENLACE 22:00:00-00:00:00 need=1  |  restringidos=[]  libres=[]
 [CLEANUP] Eliminados 36 registros con WorkstationId NULL
 API Gandarias v3.14 en http://localhost:5000
 Modo flexible nunca responde 'sin soluci├│n': usa fallback greedy si hace falta.
+API Gandarias v3.14 en http://localhost:5000
+Modo flexible nunca responde 'sin soluci├│n': usa fallback greedy si hace falta.
