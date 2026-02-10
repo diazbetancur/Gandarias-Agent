@@ -1,4 +1,4 @@
-from prueba_2 import app
+from agenda import app
 from serverless_wsgi import handle_request
 
 def handler(event, context):
