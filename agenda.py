@@ -4877,6 +4877,7 @@ def generate_flexible(week_start: date):
         "week_end": (week_start + timedelta(days=6)).isoformat(),
         "latest_end_by_wsid": latest_end_by_wsid,
         "latest_end_of_day": latest_end_by_day,
+        "coverage_pct": round((total_cov / total_req) * 100, 1) if total_req else 100,
         "summary": {
             "total_employees": len(emps),
             "total_demands": total_req,
@@ -5131,12 +5132,21 @@ def enforce_usershift_exact_and_reassign(emps, week, sched):
             continue
 
         earliest_dm = min(dms, key=lambda x: (x.start, x.end))
-        if earliest_dm.start != anchor:
-            # Día con US pero arrancando en hora distinta → se libera TODO ese día para ese empleado
+        # ── Tolerancia de ±60 min para el anchor ──
+        # Si la primera asignación arranca dentro de 60 min del anchor,
+        # NO se libera el día. Esto evita perder cobertura masivamente
+        # por diferencias pequeñas (ej. anchor=10:00, earliest=10:30).
+        anchor_min = anchor.hour * 60 + anchor.minute
+        earliest_min_val = earliest_dm.start.hour * 60 + earliest_dm.start.minute
+        anchor_diff = abs(earliest_min_val - anchor_min)
+        US_STRICT_TOLERANCE_MIN = 60  # configurable: 60 min de tolerancia
+
+        if earliest_dm.start != anchor and anchor_diff > US_STRICT_TOLERANCE_MIN:
+            # Día con US pero arrancando fuera de tolerancia → se libera TODO ese día para ese empleado
             if ASCII_LOGS:
                 print(
                     f"[US-STRICT] {emp.name} {d} anchor={anchor.strftime('%H:%M')} "
-                    f"pero earliest={earliest_dm.start.strftime('%H:%M')} ⇒ se libera el día completo."
+                    f"pero earliest={earliest_dm.start.strftime('%H:%M')} (diff={anchor_diff}min > {US_STRICT_TOLERANCE_MIN}min) ⇒ se libera el día completo."
                 )
             new_list = []
             for (e2, dm) in sched[d]:
@@ -5326,10 +5336,13 @@ def save():
         if javier_raw:
             print(f"[DEBUG-PRE-COALESCE] {d}: {javier_raw}")
 
+    # Contadores para resumen
     inserted_gaps = 0
     inserted_quality = 0
+    sugerencias_generadas = []
+    ajustes_ia = []
 
-    # 4) Inserción determinista + HU 1.1 + HU 1.2 dentro de la transacción (con SAVEPOINT)
+    # 4) Inserción determinista + HU 1.1 + HU 1.2 + HU 1.3 + HU 1.4 dentro de la transacción (con SAVEPOINT)
     try:
         with conn() as c, c.cursor() as cur:
             # --- Validación existencia semana ---
@@ -5341,7 +5354,7 @@ def save():
             if cur.fetchone()[0] and not force:
                 return jsonify({"error": "Horario ya existe para esa semana"}), 409
 
-            # --- Si force: borrar schedules + (recomendado) borrar gaps/quality de la semana ---
+            # --- Si force: borrar schedules + gaps/quality/suggestions de la semana ---
             if force:
                 cur.execute(
                     'DELETE FROM "Management"."Schedules" '
@@ -5360,11 +5373,30 @@ def save():
                     'WHERE "Date" BETWEEN %s AND %s',
                     (ws, we),
                 )
+                # Borra sugerencias de esa semana (HU 1.3)
+                try:
+                    cur.execute(
+                        'DELETE FROM "Management"."ScheduleSuggestions" '
+                        'WHERE "WeekStart" = %s',
+                        (ws,),
+                    )
+                except Exception:
+                    pass  # Si la tabla no existe aún, ignorar
+                # Borra predicciones IA de esa semana (HU 1.4)
+                try:
+                    cur.execute(
+                        'DELETE FROM "Management"."AIPredictions" '
+                        'WHERE "Token" LIKE %s',
+                        (f"{ws.isoformat()}%",),
+                    )
+                except Exception:
+                    pass  # Si la tabla no existe aún, ignorar
 
             # =========================================================
             # HU 1.1 - EXPLICADOR DE HUECOS (ScheduleGaps)
             # =========================================================
             cur.execute("SAVEPOINT hu11")
+            explicaciones = []
             try:
                 from services.explicador_huecos import ExplicadorHuecosService, ContextoExplicacion
                 from collections import defaultdict
@@ -5396,18 +5428,18 @@ def save():
                 gaps_table = '"Management"."ScheduleGaps"'
                 svc = ExplicadorHuecosService(cur, table_name=gaps_table)
 
-                # Si tu svc ya soporta token, pásalo; si no, igual funciona sin token dentro del payload.
-                explicaciones = svc.generar_y_guardar(res, ctx,  token=token)
+                explicaciones = svc.generar_y_guardar(res, ctx, token=token)
                 inserted_gaps = len(explicaciones) if explicaciones else 0
 
                 print(f"[HU1.1][DB] inserted={inserted_gaps} into {gaps_table} token={token}")
 
                 cur.execute("RELEASE SAVEPOINT hu11")
             except Exception as e:
-                # CLAVE: si falla algo aquí, hacemos rollback al savepoint
                 cur.execute("ROLLBACK TO SAVEPOINT hu11")
                 cur.execute("RELEASE SAVEPOINT hu11")
                 print("[HU1.1] Error (no aborta save):", str(e))
+                import traceback
+                traceback.print_exc()
 
             # =========================================================
             # HU 1.2 - PUNTAJE DE CALIDAD POR TURNO (por demanda/slot)
@@ -5465,7 +5497,6 @@ def save():
                 # ---------- rules por día (heurística con days_off_violations si existe) ----------
                 rules_by_day = defaultdict(lambda: 100.0)
                 days_off = (res.get("summary", {}) or {}).get("days_off_violations") or []
-                # Soporta varios formatos (lista de dict con date, o dict por fecha)
                 if isinstance(days_off, dict):
                     for k, v in days_off.items():
                         try:
@@ -5503,12 +5534,11 @@ def save():
                     inserted_quality = 0
 
                     for demand_id, s in coverage_details.items():
-                        # s: {"workstation","date","time","demanded","covered","unmet","coverage_pct"}  (prueba_2.py)
                         if not isinstance(s, dict):
                             continue
 
                         d_str = s.get("date")
-                        t_str = s.get("time")  # "HH:MM-HH:MM"
+                        t_str = s.get("time")
                         if not d_str or not t_str or "-" not in t_str:
                             continue
 
@@ -5518,7 +5548,6 @@ def save():
                         st = datetime.strptime(hh1.strip(), "%H:%M").time()
                         en = datetime.strptime(hh2.strip(), "%H:%M").time()
 
-                        # Intervalos para BD (como en Schedules)
                         st_iv = timedelta(hours=st.hour, minutes=st.minute)
                         en_iv = timedelta(hours=en.hour, minutes=en.minute)
 
@@ -5570,14 +5599,260 @@ def save():
 
                 cur.execute("RELEASE SAVEPOINT hu12")
             except Exception as e:
-                # CLAVE: si falla HU1.2, rollback a savepoint para NO abortar la transacción
                 cur.execute("ROLLBACK TO SAVEPOINT hu12")
                 cur.execute("RELEASE SAVEPOINT hu12")
                 print("[HU1.2] Error (no aborta save):", str(e))
+                import traceback
+                traceback.print_exc()
                 inserted_quality = 0
 
             # =========================================================
-            # (Tu lógica existente de overrides + coalesce + inserts Schedules)
+            # HU 1.3 - SUGERENCIAS DE MEJORA
+            # Analiza gaps y scores para generar sugerencias accionables
+            # Se guardan automáticamente en BD
+            # =========================================================
+            cur.execute("SAVEPOINT hu13")
+            try:
+                from services.sugerencias_mejora import SugerenciasMejoraService
+
+                print(f"[HU1.3][SAVE] Generando sugerencias de mejora...")
+
+                sug_svc = SugerenciasMejoraService(cur, debug=True)
+
+                # Construir quality_result desde los datos disponibles
+                quality_result = {
+                    "score": 0,
+                    "breakdown": {
+                        "coverage": float(res.get("coverage_pct", 100) or 100),
+                        "fairness": 100.0,
+                        "rules": 100.0,
+                    }
+                }
+
+                # Generar y guardar sugerencias (se guardan en BD automáticamente)
+                sugerencias_generadas = sug_svc.generar_y_guardar(
+                    gaps=explicaciones if explicaciones else [],
+                    sched=sched,
+                    emps=emps,
+                    quality_result=quality_result,
+                    token=token,
+                    week_start=ws,
+                    week_end=we,
+                )
+
+                print(f"[HU1.3][DB] inserted={len(sugerencias_generadas)} sugerencias token={token}")
+
+                cur.execute("RELEASE SAVEPOINT hu13")
+
+            except Exception as e:
+                cur.execute("ROLLBACK TO SAVEPOINT hu13")
+                cur.execute("RELEASE SAVEPOINT hu13")
+                print("[HU1.3] Error (no aborta save):", str(e))
+                import traceback
+                traceback.print_exc()
+                sugerencias_generadas = []
+
+            # =========================================================
+            # HU 1.4 - IA QUE APRENDE DEL HISTÓRICO (AUTO-TRAIN en SAVE)
+            # - Sin endpoints extra
+            # - 1) Carga modelo activo (AIModels)
+            # - 2) Si no existe, entrena (BD; fallback CSV si existe en runtime)
+            # - 3) Reajusta sched para cubrir gaps SIN violar reglas duras
+            # - 4) Guarda ajustes en AIPredictions con el token de este save
+            # =========================================================
+            
+            
+
+            ajustes_ia = []  # evita NameError si no hay gaps o no hay modelo
+
+            def _recalcular_cobertura_post_ia(res_dict, sched_dict):
+                """Recalcula cobertura *desde cero* a partir del schedule (incluye ajustes IA).
+
+                Usa res_dict["coverage_details"] como definición de slots demandados.
+                Recalcula covered/unmet por slot contando asignaciones que solapan el intervalo
+                y coinciden en workstation.
+                """
+                try:
+                    details_before = res_dict.get("coverage_details") or {}
+                    if not details_before:
+                        return None
+
+                    # Copia definición de slots y resetea cobertura
+                    details_after = json.loads(json.dumps(details_before))
+                    for _, slot in details_after.items():
+                        demanded = float(slot.get("demanded") or 0.0)
+                        slot["covered"] = 0.0
+                        slot["unmet"] = float(max(0.0, demanded))
+                        slot["coverage_pct"] = 0.0 if demanded > 0 else 100.0
+
+                    def _parse_hhmm(s):
+                        try:
+                            h, m = (s or "00:00").split(":")
+                            return int(h) * 60 + int(m)
+                        except Exception:
+                            return 0
+
+                    # index: (date, ws_name) -> demand_ids
+                    idx = {}
+                    for did, slot in details_after.items():
+                        d = slot.get("date")
+                        ws = (slot.get("workstation") or "").strip().upper()
+                        if not d or not ws:
+                            continue
+                        idx.setdefault((d, ws), []).append(did)
+
+                    # Contar asignaciones por slot
+                    for d, assigns in (sched_dict or {}).items():
+                        d_iso = d.isoformat() if hasattr(d, "isoformat") else str(d)
+                        for emp, dm in assigns:
+                            if dm is None:
+                                continue
+                            ws_name = (getattr(dm, "wsname", "") or "").strip().upper()
+                            if not ws_name:
+                                continue
+
+                            st = getattr(dm, "start", time(0, 0))
+                            en = getattr(dm, "end", time(0, 0))
+                            a_ini = st.hour * 60 + st.minute
+                            a_fin = en.hour * 60 + en.minute
+                            if a_fin <= a_ini:
+                                a_fin += 24 * 60
+
+                            for did in idx.get((d_iso, ws_name), []):
+                                slot = details_after.get(did)
+                                if not slot:
+                                    continue
+                                t = slot.get("time") or ""
+                                if "-" not in t:
+                                    continue
+                                s1, s2 = t.split("-", 1)
+                                s_ini = _parse_hhmm(s1)
+                                s_fin = _parse_hhmm(s2)
+                                if s_fin <= s_ini:
+                                    s_fin += 24 * 60
+
+                                if a_ini < s_fin and a_fin > s_ini:
+                                    demanded = float(slot.get("demanded") or 0.0)
+                                    covered = float(slot.get("covered") or 0.0)
+                                    if covered < demanded:
+                                        slot["covered"] = min(demanded, covered + 1.0)
+                                        slot["unmet"] = float(max(0.0, demanded - slot["covered"]))
+                                        slot["coverage_pct"] = (slot["covered"] / demanded * 100.0) if demanded > 0 else 100.0
+
+                    total_demanded = sum(float(s.get("demanded") or 0.0) for s in details_after.values())
+                    total_covered = sum(float(s.get("covered") or 0.0) for s in details_after.values())
+                    pct_after = (total_covered / total_demanded * 100.0) if total_demanded > 0 else 100.0
+
+                    # Guardar solo para respuesta
+                    res_dict["coverage_details_after_ai"] = details_after
+                    res_dict["summary"] = res_dict.get("summary") or {}
+                    res_dict["summary"]["total_demanded_after_ai"] = float(total_demanded)
+                    res_dict["summary"]["total_covered_after_ai"] = float(total_covered)
+                    res_dict["summary"]["coverage_pct_after_ai"] = float(pct_after)
+                    res_dict["summary"]["coverage_after_ai"] = f"{pct_after:.1f}%"
+                    return pct_after
+                except Exception as e:
+                    print(f"[HU1.4][WARN] No pude recalcular cobertura post-IA: {e}")
+                    return None
+            cur.execute("SAVEPOINT hu14")
+
+            ai_hu14_trained_pre = False
+            ai_hu14_used_source_pre = None
+
+
+            try:
+                from services.aprendizaje_historico import AprendizajeHistoricoService
+                import os
+
+                print(f"[HU1.4][SAVE] Auto-train + reajuste (pre-DB insert) token={token}")
+
+                ai_svc = AprendizajeHistoricoService(cur, debug=True)
+
+                # 1) Intentar cargar modelo activo
+                loaded = ai_svc._cargar_modelo_activo()
+
+                # 2) Si no hay modelo activo: entrenar ahora mismo (para poder reajustar en este save)
+                if not loaded:
+                    # Ventana rolling: últimas 12 semanas hasta la semana actual
+                    train_start = ws - timedelta(days=7 * 12)
+                    train_end = we
+
+                    try:
+                        _stats = ai_svc.entrenar_desde_bd(train_start, train_end)
+                        ai_hu14_trained_pre = True
+                        ai_hu14_used_source_pre = "BD"
+                        print(f"[HU1.4] Entrenado desde BD (pre): {_stats}")
+                    except Exception as e_bd:
+                        # Fallback a CSV local (solo si existe en ese runtime: local / lambda package)
+                        csv_path = os.path.join(os.path.dirname(__file__), "_Schedules__202601300806.csv")
+                        if os.path.exists(csv_path):
+                            _stats = ai_svc.entrenar_desde_csv(csv_path)
+                            ai_hu14_trained_pre = True
+                            ai_hu14_used_source_pre = "CSV"
+                            print(f"[HU1.4] Entrenado desde CSV (pre): {_stats}")
+                        else:
+                            print(f"[HU1.4][WARN] No pude entrenar ni desde BD ni CSV. Detalle BD: {e_bd}")
+                            _stats = None
+
+                # 3) Métricas de cobertura antes de IA (lo que venía del solver)
+                coverage_pct_before_ai = float(
+                    res.get("coverage_pct")
+                    or (res.get("summary") or {}).get("coverage")
+                    or 0.0
+                )
+                coverage_before_ai = res.get("coverage") or f"{coverage_pct_before_ai:.1f}%"
+
+                # 4) Reajustar schedule para cubrir gaps (si hay modelo/reajustador)
+                inserted_ai = 0
+                if explicaciones:
+                    sched_mejorado, ajustes_ia = ai_svc.reajustar_schedule(
+                        sched=sched,
+                        gaps=explicaciones,
+                        emps=emps,
+                        week=week,
+                    )
+
+                    if ajustes_ia:
+                        sched = sched_mejorado  # <-- clave: esto es lo que termina guardándose en Schedules
+                        inserted_ai = ai_svc.guardar_ajustes(ajustes_ia, token)
+                        print(f"[HU1.4][DB] ajustes_aplicados={len(ajustes_ia)}; inserted={inserted_ai} en AIPredictions token={token}")
+                    else:
+                        print("[HU1.4] No se aplicaron ajustes (no hay candidatos válidos sin romper reglas).")
+                else:
+                    print("[HU1.4] No hay gaps -> no se intenta reajuste.")
+                    ajustes_ia = []
+
+                # 5) ✅ Recalcular cobertura con el schedule FINAL (incluye IA si hubo)
+                pct_after = _recalcular_cobertura_post_ia(res, sched)
+                if pct_after is not None and pct_after > coverage_pct_before_ai:
+                    res["coverage_pct"] = float(pct_after)
+                    res["coverage"] = f"{pct_after:.1f}%"
+                elif pct_after is not None:
+                    # La IA no mejoró, conservar cobertura original
+                    print(f"[HU1.4][INFO] Cobertura post-IA ({pct_after:.1f}%) <= pre-IA ({coverage_pct_before_ai:.1f}%). Conservando schedule con ajustes IA pero reportando cobertura real.")
+                    res["coverage_pct"] = float(pct_after)
+                    res["coverage"] = f"{pct_after:.1f}%"
+
+                res["summary"] = res.get("summary") or {}
+                res["summary"]["coverage_before_ai"] = coverage_before_ai
+                res["summary"]["coverage_after_ai"] = res.get("coverage") or coverage_before_ai
+                res["summary"]["coverage_pct_before_ai"] = float(coverage_pct_before_ai or 0.0)
+                res["summary"]["coverage_pct_after_ai"] = float(res.get("coverage_pct") or 0.0)
+                res["summary"]["hu14_ai_adjustments"] = int(len(ajustes_ia or []))
+                res["summary"]["hu14_ai_rows_inserted"] = int(inserted_ai or 0)
+
+                cur.execute("RELEASE SAVEPOINT hu14")
+            except Exception as e:
+                cur.execute("ROLLBACK TO SAVEPOINT hu14")
+                cur.execute("RELEASE SAVEPOINT hu14")
+                print("[HU1.4] Error (no aborta save):", str(e))
+                import traceback
+                traceback.print_exc()
+                ajustes_ia = []
+
+            # =========================================================
+            # GUARDAR SCHEDULES EN BD
+            # (Tu lógica existente de overrides + coalesce + inserts)
             # =========================================================
             overrides_list = (
                 (res.get("summary", {}) or {})
@@ -5598,14 +5873,14 @@ def save():
                     sched[d],
                     key=lambda x: (
                         x[0].name,
-                        x[1].wsname,
-                        _t2m(x[1].start),
+                        x[1].wsname if x[1] else "",
+                        _t2m(x[1].start) if x[1] else 0,
                     ),
                 )
 
                 # Ausencias
                 for emp, dm in ass:
-                    if dm.wsid is None:
+                    if dm is None or dm.wsid is None:
                         cur.execute(
                             '''
                             INSERT INTO "Management"."Schedules"
@@ -5621,7 +5896,7 @@ def save():
                                 None,
                                 None,
                                 None,
-                                emp.abs_reason.get(d, 'ABS'),
+                                emp.abs_reason.get(d, 'ABS') if hasattr(emp, 'abs_reason') else 'ABS',
                                 False,
                                 now(),
                             ),
@@ -5630,26 +5905,43 @@ def save():
                 # Coalesce + obs
                 coalesced = coalesce_employee_day_workstation(ass)
 
-                # --- FILTRO: Eliminar bloques coalescidos menores a MIN_SHIFT_DURATION_HOURS ---
-                MIN_BLOCK_SAVE_MIN = MIN_SHIFT_DURATION_HOURS * 60
+                # --- FILTRO (ajustado): NO eliminar segmentos cortos por workstation en flexible mode.
+                # Un empleado puede alternar estaciones dentro de un mismo turno. La regla "mínimo 3h" aplica al
+                # total del día (o bloque continuo), no a cada segmento por estación.
+                from collections import defaultdict
+
+                MIN_BLOCK_SAVE_MIN = int(MIN_SHIFT_DURATION_HOURS * 60)
+
+                # total minutos por empleado en el día d (sumando todas las estaciones)
+                _total_min_by_eid = defaultdict(int)
+                for (eid_filt, wsid_filt), rows_filt in coalesced.items():
+                    if wsid_filt is None:
+                        continue
+                    for emp_f, s_min_f, e_min_f, src_dms_f in rows_filt:
+                        dur_min_f = max(0, int(e_min_f - s_min_f))
+                        _total_min_by_eid[eid_filt] += dur_min_f
+
+                # Si el total del día < mínimo, se omite TODO el día para ese empleado; si no, se guardan todos los segmentos (aunque sean cortos).
+                _logged_min_day = set()
                 for (eid_filt, wsid_filt), rows_filt in list(coalesced.items()):
                     if wsid_filt is None:
                         continue
-
-                    filtered_rows = []
-                    for emp_f, s_min_f, e_min_f, src_dms_f in rows_filt:
-                        dur_min_f = e_min_f - s_min_f
-                        if dur_min_f >= MIN_BLOCK_SAVE_MIN:
-                            filtered_rows.append((emp_f, s_min_f, e_min_f, src_dms_f))
-                        elif ASCII_LOGS:
-                            print(
-                                f"[SAVE-MIN-BLOCK] Bloque <{MIN_SHIFT_DURATION_HOURS}h omitido: "
-                                f"{emp_f.name} {d} wsid={wsid_filt} "
-                                f"{_m2t(s_min_f).strftime('%H:%M')}-{_m2t(e_min_f if e_min_f < 24*60 else 0).strftime('%H:%M')} "
-                                f"({dur_min_f}min)"
-                            )
-                    coalesced[(eid_filt, wsid_filt)] = filtered_rows
+                    day_total = _total_min_by_eid.get(eid_filt, 0)
+                    if day_total < MIN_BLOCK_SAVE_MIN:
+                        if ASCII_LOGS and eid_filt not in _logged_min_day:
+                            any_name = rows_filt[0][0].name if rows_filt else str(eid_filt)
+                            print(f"[SAVE-MIN-DAY] Día {d} omitido para {any_name} ({eid_filt}): total {day_total/60:.2f}h < {MIN_SHIFT_DURATION_HOURS}h")
+                            _logged_min_day.add(eid_filt)
+                        coalesced[(eid_filt, wsid_filt)] = []
+                    else:
+                        # limpiar solo segmentos inválidos (0 o negativos)
+                        filtered_rows = []
+                        for emp_f, s_min_f, e_min_f, src_dms_f in rows_filt:
+                            if e_min_f > s_min_f:
+                                filtered_rows.append((emp_f, s_min_f, e_min_f, src_dms_f))
+                        coalesced[(eid_filt, wsid_filt)] = filtered_rows
                 # --- FIN FILTRO ---
+
 
                 # --- CAP de 10h/día por empleado (sin duplicar híbridos) ---
                 DAILY_CAP_MIN = MAX_HOURS_PER_DAY * 60
@@ -5762,18 +6054,66 @@ def save():
                             ),
                         )
 
+            # =========================================================
+            # HU 1.4 - Entrenamiento continuo POST-GUARDADO
+            # (para que el modelo aprenda de la semana recién insertada en Schedules)
+            # =========================================================
+            cur.execute("SAVEPOINT hu14_post")
+            try:
+                from services.aprendizaje_historico import AprendizajeHistoricoService
+
+                ai_svc_post = AprendizajeHistoricoService(cur, debug=True)
+
+                # Re-entrenar con ventana rolling incluyendo la semana recién guardada
+                train_start = ws - timedelta(days=7 * 12)
+                train_end = we
+
+                stats_post = ai_svc_post.entrenar_desde_bd(train_start, train_end)
+
+                # Guardar modelo como activo (AIModels)
+                model_id = ai_svc_post.guardar_modelo(nombre="auto", version=f"auto-{ws.isoformat()}")
+
+                # Registrar corrida en AITrainingHistory (no bloquea si falla)
+                try:
+                    ai_svc_post.registrar_training_history(
+                        model_id=model_id,
+                        data_start=train_start,
+                        data_end=train_end,
+                        notes=f"post-save token={token} ajustes={len(ajustes_ia)}",
+                        coverage_improvement=float((res.get("summary", {}) or {}).get("coverage_pct_after_ai", 0.0) - float((res.get("summary", {}) or {}).get("coverage_pct_before_ai", 0.0))),
+                    )
+                except Exception as _e:
+                    print(f"[HU1.4][DB] AITrainingHistory skip (ok): {_e}")
+
+                print(f"[HU1.4][POST] Modelo guardado activo id={model_id} stats={stats_post}")
+
+                cur.execute("RELEASE SAVEPOINT hu14_post")
+            except Exception as e:
+                cur.execute("ROLLBACK TO SAVEPOINT hu14_post")
+                cur.execute("RELEASE SAVEPOINT hu14_post")
+                print("[HU1.4][POST] Error (no aborta save):", str(e))
+                import traceback
+                traceback.print_exc()
+
+
             cleanup_null_workstation_schedules(cur, ws, we)
             c.commit()
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "Error al guardar", "detail": str(e)}), 500
 
-    # Respuesta + resumen HU
+    # =========================================================
+    # RESPUESTA + RESUMEN DE TODAS LAS HUs
+    # =========================================================
     out = dict(res) if isinstance(res, dict) else {"result": res}
     out.setdefault("summary", {})
     out["summary"]["token"] = token
     out["summary"]["hu11_gaps_inserted"] = inserted_gaps
     out["summary"]["hu12_quality_rows_inserted"] = inserted_quality
+    out["summary"]["hu13_suggestions_generated"] = len(sugerencias_generadas) if sugerencias_generadas else 0
+    out["summary"]["hu14_ai_adjustments"] = len(ajustes_ia) if ajustes_ia else 0
 
     return jsonify(
         {
@@ -5781,6 +6121,7 @@ def save():
             **out,
         }
     ), 201
+
 
 # ───────── MAIN ─────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
