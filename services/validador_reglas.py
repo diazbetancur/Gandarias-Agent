@@ -232,7 +232,7 @@ class ValidadorReglasService:
         self._log(f"Resultado: {r.total_violaciones} violaciones ({cr}C {al}A {me}M {ba}B) | {'VALIDO' if r.schedule_valido else 'INVALIDO'}")
         return r
 
-    def guardar(self, resultado, token, week_start, week_end, is_post_ai=False):
+    def guardar(self, resultado, token, week_start, week_end, is_post_ai=True):
         if not self.cur:
             return 0
         try:
@@ -253,7 +253,7 @@ class ValidadorReglasService:
             self._log(f"Error guardando: {e}")
             return 0
 
-    def validar_y_guardar(self, sched, token, week_start, week_end, emps=None, is_post_ai=False):
+    def validar_y_guardar(self, sched, token, week_start, week_end, emps=None, is_post_ai=True):
         r = self.validar(sched, emps)
         self.guardar(r, token, week_start, week_end, is_post_ai)
         return r

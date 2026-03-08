@@ -1,4 +1,14 @@
 # services/explicador_huecos.py
+"""
+HU 1.1 - Explicador de Huecos en la Agenda — v4.2 CORREGIDO
+=============================================================
+CORRECCIONES v4.2:
+  - INSERT usa time (no timedelta) para StartTime/EndTime ya que BD usa
+    "time without time zone" en ScheduleGaps
+  - Retorna explicaciones completas con claves correctas para HU 1.3
+  - Mejora robustez del resolve wsid
+  - Agrega conteo de razones para alimentar HU 1.4 (aprendizaje)
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -61,7 +71,7 @@ class HuecoNoCubierto:
 
 
 # =========================
-# 4) CONTEXTO (ADAPTADO A prueba_2.py)
+# 4) CONTEXTO
 # =========================
 @dataclass
 class ContextoExplicacion:
@@ -96,20 +106,16 @@ class ContextoExplicacion:
         return False
 
     def viola_descanso_legal_minimo(self, e: Any, inicio: datetime) -> bool:
-        # Stub (engancha LawRestrictions si lo tienes en Emp)
         min_rest = getattr(e, "min_rest_hours", None)
         if min_rest is None:
             return False
-
         empleado_id = self.empleado_id(e)
         asigns = self.asignaciones_por_empleado.get(empleado_id, [])
         if not asigns:
             return False
-
         prev_end = max((a_fin for (a_ini, a_fin, _ws) in asigns if a_fin <= inicio), default=None)
         if prev_end is None:
             return False
-
         horas = (inicio - prev_end).total_seconds() / 3600
         return horas < float(min_rest)
 
@@ -117,12 +123,10 @@ class ContextoExplicacion:
         max_week = getattr(e, "max_week_hours", None)
         if max_week is None:
             return False
-
         empleado_id = self.empleado_id(e)
         total_horas = 0.0
         for (a_ini, a_fin, _ws) in self.asignaciones_por_empleado.get(empleado_id, []):
             total_horas += (a_fin - a_ini).total_seconds() / 3600
-
         nuevo = (fin - inicio).total_seconds() / 3600
         return (total_horas + nuevo) > float(max_week)
 
@@ -137,13 +141,7 @@ def build_asignaciones_por_empleado(
     week: List[date],
     sched: Dict[date, List[Tuple[Any, Any]]],
 ) -> Dict[Any, List[Tuple[datetime, datetime, Any]]]:
-    """
-    Convierte sched[date] = [(emp, dm), ...] a:
-      emp_id -> [(dt_inicio, dt_fin, wsid)]
-    Ignora ausencias (wsid None).
-    """
     out: Dict[Any, List[Tuple[datetime, datetime, Any]]] = {}
-
     for d in week:
         for emp, dm in (sched.get(d) or []):
             wsid = getattr(dm, "wsid", None)
@@ -153,19 +151,16 @@ def build_asignaciones_por_empleado(
             en = getattr(dm, "end", None)
             if st is None or en is None:
                 continue
-
             ini = datetime.combine(d, st)
             fin = datetime.combine(d, en)
             if en == time(0, 0) or fin <= ini:
                 fin = datetime.combine(d + timedelta(days=1), en)
-
             out.setdefault(emp.id, []).append((ini, fin, wsid))
-
     return out
 
 
 # =========================
-# 5) SERVICIO PRINCIPAL
+# 5) SERVICIO PRINCIPAL  — v4.2 CORREGIDO
 # =========================
 class ExplicadorHuecosService:
     def __init__(
@@ -184,36 +179,30 @@ class ExplicadorHuecosService:
             print(msg)
 
     def _resolve_wsid_by_name(self, wsname: str) -> Optional[str]:
-        """
-        Busca WorkstationId por nombre en Management.Workstations.
-        Cachea resultados para no spamear DB.
-        """
         if not wsname:
             return None
-
         if wsname in self._wsid_cache:
             return self._wsid_cache[wsname]
-
-        # 1) exact match
-        self.cur.execute(
-            'SELECT "Id" FROM "Management"."Workstations" WHERE "Name" = %s LIMIT 1',
-            (wsname,),
-        )
-        row = self.cur.fetchone()
-        if row and row[0]:
-            self._wsid_cache[wsname] = str(row[0])
-            return self._wsid_cache[wsname]
-
-        # 2) fallback ilike
-        self.cur.execute(
-            'SELECT "Id","Name" FROM "Management"."Workstations" WHERE "Name" ILIKE %s LIMIT 1',
-            (wsname,),
-        )
-        row = self.cur.fetchone()
-        if row and row[0]:
-            self._wsid_cache[wsname] = str(row[0])
-            self._log(f'[HU1.1][WSID] ILIKE match: "{wsname}" -> "{row[1]}" ({row[0]})')
-            return self._wsid_cache[wsname]
+        try:
+            self.cur.execute(
+                'SELECT "Id" FROM "Management"."Workstations" WHERE "Name" = %s LIMIT 1',
+                (wsname,),
+            )
+            row = self.cur.fetchone()
+            if row and row[0]:
+                self._wsid_cache[wsname] = str(row[0])
+                return self._wsid_cache[wsname]
+            self.cur.execute(
+                'SELECT "Id","Name" FROM "Management"."Workstations" WHERE "Name" ILIKE %s LIMIT 1',
+                (wsname,),
+            )
+            row = self.cur.fetchone()
+            if row and row[0]:
+                self._wsid_cache[wsname] = str(row[0])
+                self._log(f'[HU1.1][WSID] ILIKE match: "{wsname}" -> "{row[1]}" ({row[0]})')
+                return self._wsid_cache[wsname]
+        except Exception as e:
+            self._log(f'[HU1.1][WSID][ERR] Error resolviendo "{wsname}": {e}')
 
         self._wsid_cache[wsname] = None
         self._log(f'[HU1.1][WSID][WARN] No pude resolver WorkstationId para "{wsname}"')
@@ -227,57 +216,38 @@ class ExplicadorHuecosService:
             self._log("[HU1.1][DETECT][WARN] agenda_result no es dict; no puedo detectar huecos.")
             return huecos
 
-        keys = list(agenda_result.keys())
-        self._log(f"[HU1.1][DETECT] res keys={keys}")
-
-        # A) Si algún día agregas unmet_segments, lo soportamos
+        # A) unmet_segments (futuro)
         unmet_segments = agenda_result.get("unmet_segments") or []
         unmet_demands = agenda_result.get("unmet_demands") or []
         if unmet_segments:
             self._log(f"[HU1.1][DETECT] usando unmet_segments: {len(unmet_segments)} segmentos.")
             by_demand_id = {d.get("demand_id"): d for d in unmet_demands if d.get("demand_id") is not None}
-
             for seg in unmet_segments:
                 faltante = float(seg.get("unmet", 0.0) or 0.0)
                 if faltante <= 0:
                     continue
-
                 demand_id = seg.get("demand_id")
                 d = by_demand_id.get(demand_id, {}) if demand_id is not None else {}
-
                 requerido = float(d.get("required", faltante))
                 covered = float(d.get("covered", max(0.0, requerido - faltante)))
-                asignado = covered
-
                 wsid = seg.get("wsid") or d.get("wsid")
                 wsname = seg.get("wsname") or d.get("wsname") or str(wsid)
-
                 day = datetime.strptime(seg["date"], "%Y-%m-%d").date()
                 st = datetime.strptime(seg["start"], "%H:%M").time()
                 en = datetime.strptime(seg["end"], "%H:%M").time()
-
                 inicio = datetime.combine(day, st)
                 fin = datetime.combine(day, en)
                 if en == time(0, 0) or fin <= inicio:
                     fin = datetime.combine(day + timedelta(days=1), en)
-
-                huecos.append(
-                    HuecoNoCubierto(
-                        inicio=inicio,
-                        fin=fin,
-                        workstation_id=wsid,
-                        workstation_nombre=wsname,
-                        requerido=requerido,
-                        asignado=asignado,
-                        faltante=faltante,
-                        agenda_id=agenda_result.get("schedule_id") or agenda_result.get("id"),
-                    )
-                )
-
+                huecos.append(HuecoNoCubierto(
+                    inicio=inicio, fin=fin, workstation_id=wsid, workstation_nombre=wsname,
+                    requerido=requerido, asignado=covered, faltante=faltante,
+                    agenda_id=agenda_result.get("schedule_id") or agenda_result.get("id"),
+                ))
             self._log(f"[HU1.1][DETECT] huecos detectados={len(huecos)} (desde unmet_segments).")
             return huecos
 
-        # B) HU1.1 real en tu proyecto: usar coverage_details (SÍ existe en generate_flexible)
+        # B) coverage_details (flujo actual)
         coverage_details = agenda_result.get("coverage_details") or {}
         if not coverage_details:
             self._log("[HU1.1][DETECT] res no tiene coverage_details; huecos=0.")
@@ -295,7 +265,7 @@ class ExplicadorHuecosService:
 
             wsname = cd.get("workstation") or "UNKNOWN"
             date_str = cd.get("date")
-            time_str = cd.get("time")  # "HH:MM-HH:MM"
+            time_str = cd.get("time")
             if not date_str or not time_str or "-" not in time_str:
                 self._log(f"[HU1.1][DETECT][WARN] demand_id={demand_id} sin date/time válido: {cd}")
                 continue
@@ -318,26 +288,18 @@ class ExplicadorHuecosService:
             if not wsid:
                 wsid = self._resolve_wsid_by_name(wsname)
 
-            huecos.append(
-                HuecoNoCubierto(
-                    inicio=inicio,
-                    fin=fin,
-                    workstation_id=str(wsid) if wsid else None,
-                    workstation_nombre=wsname,
-                    requerido=requerido,
-                    asignado=asignado,
-                    faltante=faltante,
-                    agenda_id=agenda_result.get("schedule_id") or agenda_result.get("id"),
-                )
-            )
+            huecos.append(HuecoNoCubierto(
+                inicio=inicio, fin=fin, workstation_id=str(wsid) if wsid else None,
+                workstation_nombre=wsname, requerido=requerido, asignado=asignado,
+                faltante=faltante,
+                agenda_id=agenda_result.get("schedule_id") or agenda_result.get("id"),
+            ))
 
         self._log(f"[HU1.1][DETECT] huecos detectados={len(huecos)} (desde coverage_details).")
         if huecos[:3]:
             self._log("[HU1.1][DETECT] ejemplo huecos (primeros 3):")
             for h in huecos[:3]:
-                self._log(
-                    f"  - {h.workstation_nombre} {h.inicio:%Y-%m-%d %H:%M}-{h.fin:%H:%M} faltante={h.faltante}"
-                )
+                self._log(f"  - {h.workstation_nombre} {h.inicio:%Y-%m-%d %H:%M}-{h.fin:%H:%M} faltante={h.faltante}")
         return huecos
 
     # ---------- explicar hueco ----------
@@ -401,7 +363,8 @@ class ExplicadorHuecosService:
 
         return {
             "agenda_id": hueco.agenda_id,
-            "workstation": {"id": hueco.workstation_id, "nombre": hueco.workstation_nombre},
+            "workstation": {"id": str(hueco.workstation_id) if hueco.workstation_id else None,
+                           "nombre": hueco.workstation_nombre},
             "slot": {"inicio": hueco.inicio.isoformat(), "fin": hueco.fin.isoformat()},
             "cobertura": {"requerido": hueco.requerido, "asignado": hueco.asignado, "faltante": hueco.faltante},
             "categoria": categoria.value,
@@ -442,7 +405,6 @@ class ExplicadorHuecosService:
             partes.append(f"{breakdown[CodigoRazon.MAX_HORAS_SEMANALES]} por tope de horas")
         if breakdown.get(CodigoRazon.REGLA_NEGOCIO_BLOQUEA, 0) > 0:
             partes.append(f"{breakdown[CodigoRazon.REGLA_NEGOCIO_BLOQUEA]} por regla de negocio")
-
         detalle = "; ".join(partes) if partes else "sin candidatos elegibles"
         return (
             f"Hueco no cubierto en {hueco.workstation_nombre} "
@@ -454,7 +416,6 @@ class ExplicadorHuecosService:
     def _acciones_sugeridas(self, categoria: CategoriaHueco, hueco: HuecoNoCubierto, breakdown: Dict[CodigoRazon, int]) -> List[str]:
         ws = hueco.workstation_nombre
         acciones: List[str] = []
-
         if categoria == CategoriaHueco.FALTA_DE_PERSONAL:
             if breakdown.get(CodigoRazon.SKILL_FALTANTE, 0) > 0:
                 acciones.append(f"Capacitar/autorizar más personal para cubrir {ws} (skill).")
@@ -462,33 +423,27 @@ class ExplicadorHuecosService:
                 acciones.append("Ajustar ventanas UserShift/disponibilidad para ese horario o contratar refuerzo.")
             acciones.append("Revisar si la demanda (requerido) está sobreestimada para ese slot.")
             return acciones
-
         if categoria in (CategoriaHueco.DESCANSOS_OBLIGATORIOS, CategoriaHueco.RESTRICCIONES_LEGALES):
             acciones.append("Revisar restricción de descanso mínimo entre turnos (LawRestrictions).")
             acciones.append("Re-balancear turnos para respetar descansos.")
             return acciones
-
         if categoria == CategoriaHueco.HORAS_MAXIMAS_CONTRATADAS:
             acciones.append("Aumentar horas contratadas o habilitar horas extra (si aplica).")
             acciones.append("Redistribuir carga semanal a personal con horas disponibles.")
             return acciones
-
         if categoria == CategoriaHueco.INCOMPATIBILIDAD_DE_TURNOS:
             acciones.append("Revisar solapes de turnos; ajustar asignaciones previas.")
             acciones.append("Permitir swap/rotación para liberar el slot del hueco.")
             return acciones
-
         if categoria == CategoriaHueco.CONTRADICCION_DE_REGLAS:
             acciones.append("Identificar la regla que bloquea (pairing hyb 0.5, fairness hard, etc.).")
             acciones.append("Relajar esa regla o moverla a soft-constraint con penalización.")
             return acciones
-
         acciones.append("Revisar límites operativos (capacidad por estación, máximos simultáneos, etc.).")
         return acciones
 
-    # ---------- persistir en ScheduleGaps ----------
+    # ---------- PERSISTENCIA — CORREGIDO v4.2 ----------
     def _ensure_is_post_ai_column(self):
-        """Agrega columna IsPostAi si no existe (auto-migración)."""
         try:
             self.cur.execute(f"""
                 DO $$ BEGIN
@@ -511,9 +466,12 @@ class ExplicadorHuecosService:
 
         self._ensure_is_post_ai_column()
 
+        # CORREGIDO v4.2: BD usa "time without time zone", no interval
+        # Usamos time objects directamente
         sql = f"""
             INSERT INTO {self.table_name}
-              ("Id","Date","WorkstationId","StartTime","EndTime","GapExplanation","GapCategory","Token","IsPostAi","CreatedAt")
+              ("Id","Date","WorkstationId","StartTime","EndTime",
+               "GapExplanation","GapCategory","Token","IsPostAi","CreatedAt")
             VALUES
               (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
@@ -535,27 +493,31 @@ class ExplicadorHuecosService:
             ini = datetime.fromisoformat(exp["slot"]["inicio"])
             fin = datetime.fromisoformat(exp["slot"]["fin"])
 
-            st_td = timedelta(hours=ini.hour, minutes=ini.minute)
-            en_td = timedelta(hours=fin.hour, minutes=fin.minute)
+            # CORREGIDO: usar time objects para "time without time zone"
+            st_time = ini.time()
+            en_time = fin.time()
 
             payload = json.dumps(exp, ensure_ascii=False)
 
-            self.cur.execute(
-                sql,
-                (
-                    str(uuid4()),
-                    ini.date(),
-                    str(wsid),
-                    st_td,
-                    en_td,
-                    payload,
-                    exp.get("categoria"),
-                    token,
-                    bool(is_post_ai),
-                    now_dt,
-                ),
-            )
-            inserted += 1
+            try:
+                self.cur.execute(
+                    sql,
+                    (
+                        str(uuid4()),
+                        ini.date(),
+                        str(wsid),
+                        st_time,
+                        en_time,
+                        payload,
+                        exp.get("categoria"),
+                        token,
+                        bool(is_post_ai),
+                        now_dt,
+                    ),
+                )
+                inserted += 1
+            except Exception as e:
+                self._log(f"[HU1.1][DB][ERR] Error insertando gap: {e}")
 
         self._log(f"[HU1.1][DB] inserted={inserted} rows into {self.table_name} token={token} is_post_ai={is_post_ai}")
         return inserted
