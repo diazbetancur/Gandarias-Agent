@@ -531,26 +531,41 @@ class SugerenciasMejoraService:
     # PERSISTENCIA
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _ensure_is_post_ai_column(self):
+        """Agrega columna IsPostAi si no existe (auto-migración)."""
+        try:
+            self.cur.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE {self.table_name} ADD COLUMN "IsPostAi" boolean NOT NULL DEFAULT false;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """)
+        except Exception:
+            pass
+
     def guardar_sugerencias(
         self,
         sugerencias: List[Sugerencia],
         token: str,
         week_start: date,
         week_end: date,
+        is_post_ai: bool = False,
     ) -> int:
         """Persiste las sugerencias en la base de datos."""
         if not sugerencias:
             self._log("No hay sugerencias para guardar")
             return 0
 
+        self._ensure_is_post_ai_column()
+
         sql = f"""
             INSERT INTO {self.table_name}
               ("Id", "Token", "WeekStart", "WeekEnd", "Tipo", "Prioridad",
                "Titulo", "Descripcion", "ImpactoEsperado", "MejoraEstimada",
                "Detalles", "EmpleadosInvolucrados", "WorkstationsAfectadas",
-               "DiasAfectados", "AccionesConcretas", "CreatedAt")
+               "DiasAfectados", "AccionesConcretas", "IsPostAi", "CreatedAt")
             VALUES
-              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         inserted = 0
@@ -574,13 +589,14 @@ class SugerenciasMejoraService:
                     json.dumps(sug.workstations_afectadas),
                     json.dumps(sug.dias_afectados),
                     json.dumps(sug.acciones_concretas, ensure_ascii=False),
+                    bool(is_post_ai),
                     now_dt,
                 ))
                 inserted += 1
             except Exception as e:
                 self._log(f"Error insertando sugerencia: {e}")
 
-        self._log(f"Insertadas {inserted} sugerencias en {self.table_name}")
+        self._log(f"Insertadas {inserted} sugerencias en {self.table_name} is_post_ai={is_post_ai}")
         return inserted
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -596,46 +612,28 @@ class SugerenciasMejoraService:
         token: str,
         week_start: date,
         week_end: date,
+        is_post_ai: bool = False,
     ) -> List[Dict[str, Any]]:
-        """
-        Genera y guarda todas las sugerencias de mejora.
-
-        Args:
-            gaps: Lista de explicaciones de gaps (de HU 1.1)
-            sched: Schedule generado (dict date -> [(emp, dm)])
-            emps: Lista de empleados
-            quality_result: Resultado del cálculo de calidad (de HU 1.2)
-            token: Token del schedule
-            week_start: Fecha inicio de semana
-            week_end: Fecha fin de semana
-
-        Returns:
-            Lista de sugerencias como diccionarios
-        """
-        self._log(f"==== START generar_y_guardar token={token} ====")
+        self._log(f"==== START generar_y_guardar token={token} is_post_ai={is_post_ai} ====")
 
         todas_sugerencias: List[Sugerencia] = []
 
-        # 1. Analizar y generar sugerencias de gaps
         analisis_gaps = self._analizar_gaps(gaps)
         self._log(f"Gaps analizados: {analisis_gaps.total_gaps}")
         sugerencias_gaps = self._generar_sugerencias_gaps(gaps, analisis_gaps)
         todas_sugerencias.extend(sugerencias_gaps)
         self._log(f"Sugerencias de gaps: {len(sugerencias_gaps)}")
 
-        # 2. Analizar y generar sugerencias de empleados
         analisis_emp = self._analizar_empleados(sched, emps)
         self._log(f"Empleados analizados: {len(analisis_emp.minutos_por_empleado)}")
         sugerencias_emp = self._generar_sugerencias_empleados(analisis_emp)
         todas_sugerencias.extend(sugerencias_emp)
         self._log(f"Sugerencias de empleados: {len(sugerencias_emp)}")
 
-        # 3. Generar sugerencias de scores
         sugerencias_scores = self._generar_sugerencias_scores(quality_result)
         todas_sugerencias.extend(sugerencias_scores)
         self._log(f"Sugerencias de scores: {len(sugerencias_scores)}")
 
-        # 4. Ordenar por prioridad
         prioridad_orden = {
             PrioridadSugerencia.CRITICA: 0,
             PrioridadSugerencia.ALTA: 1,
@@ -644,10 +642,7 @@ class SugerenciasMejoraService:
         }
         todas_sugerencias.sort(key=lambda s: prioridad_orden.get(s.prioridad, 4))
 
-        # 5. Guardar
-        inserted = self.guardar_sugerencias(todas_sugerencias, token, week_start, week_end)
+        inserted = self.guardar_sugerencias(todas_sugerencias, token, week_start, week_end, is_post_ai=is_post_ai)
         self._log(f"==== END generar_y_guardar inserted={inserted} ====")
 
         return [s.to_dict() for s in todas_sugerencias]
-
-

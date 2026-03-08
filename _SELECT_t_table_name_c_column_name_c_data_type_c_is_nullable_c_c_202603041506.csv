@@ -1,0 +1,327 @@
+"table_name","column_name","data_type","is_nullable","column_default"
+AIModels,Id,uuid,NO,
+AIModels,Name,character varying,NO,
+AIModels,Version,character varying,NO,
+AIModels,ModelData,bytea,NO,
+AIModels,TrainingStats,jsonb,YES,
+AIModels,IsActive,boolean,YES,false
+AIModels,CreatedAt,timestamp without time zone,YES,CURRENT_TIMESTAMP
+AIModels,UpdatedAt,timestamp without time zone,YES,CURRENT_TIMESTAMP
+AIPredictions,Id,uuid,NO,
+AIPredictions,Token,character varying,NO,
+AIPredictions,ModelId,uuid,YES,
+AIPredictions,GapId,uuid,YES,
+AIPredictions,SugerenciaEmpleadoId,uuid,YES,
+AIPredictions,SugerenciaTurno,jsonb,YES,
+AIPredictions,ScoreConfianza,numeric,YES,
+AIPredictions,Justificacion,text,YES,
+AIPredictions,Aplicada,boolean,YES,false
+AIPredictions,CreatedAt,timestamp without time zone,YES,CURRENT_TIMESTAMP
+AITrainingHistory,Id,uuid,NO,gen_random_uuid()
+AITrainingHistory,ModelId,uuid,YES,
+AITrainingHistory,TrainingDate,timestamp without time zone,YES,CURRENT_TIMESTAMP
+AITrainingHistory,DataStartDate,date,YES,
+AITrainingHistory,DataEndDate,date,YES,
+AITrainingHistory,RecordsProcessed,integer,YES,
+AITrainingHistory,WeeksProcessed,integer,YES,
+AITrainingHistory,PatternsTurnos,integer,YES,
+AITrainingHistory,PatternsEmpWs,integer,YES,
+AITrainingHistory,CoverageImprovement,numeric,YES,
+AITrainingHistory,Notes,text,YES,
+AbsenteeismTypes,Id,uuid,NO,gen_random_uuid()
+AbsenteeismTypes,Name,text,NO,
+AbsenteeismTypes,IsDeleted,boolean,NO,
+AbsenteeismTypes,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+AspNetRoleClaims,Id,integer,NO,
+AspNetRoleClaims,RoleId,uuid,NO,
+AspNetRoleClaims,ClaimType,text,YES,
+AspNetRoleClaims,ClaimValue,text,YES,
+AspNetRoles,Id,uuid,NO,gen_random_uuid()
+AspNetRoles,IsActive,boolean,NO,
+AspNetRoles,Name,character varying,YES,
+AspNetRoles,NormalizedName,character varying,YES,
+AspNetRoles,ConcurrencyStamp,text,YES,
+AspNetUserClaims,Id,integer,NO,
+AspNetUserClaims,UserId,uuid,NO,
+AspNetUserClaims,ClaimType,text,YES,
+AspNetUserClaims,ClaimValue,text,YES,
+AspNetUserLogins,LoginProvider,text,NO,
+AspNetUserLogins,ProviderKey,text,NO,
+AspNetUserLogins,ProviderDisplayName,text,YES,
+AspNetUserLogins,UserId,uuid,NO,
+AspNetUserRoles,UserId,uuid,NO,
+AspNetUserRoles,RoleId,uuid,NO,
+AspNetUserTokens,UserId,uuid,NO,
+AspNetUserTokens,LoginProvider,text,NO,
+AspNetUserTokens,Name,text,NO,
+AspNetUserTokens,Value,text,YES,
+AspNetUsers,Id,uuid,NO,gen_random_uuid()
+AspNetUsers,FirstName,character varying,YES,
+AspNetUsers,LastName,character varying,YES,
+AspNetUsers,IsActive,boolean,NO,
+AspNetUsers,NickName,text,NO,
+AspNetUsers,HireDate,timestamp with time zone,NO,
+AspNetUsers,HireTypeId,uuid,YES,
+AspNetUsers,IsDelete,boolean,NO,
+AspNetUsers,UserName,character varying,YES,
+AspNetUsers,NormalizedUserName,character varying,YES,
+AspNetUsers,Email,character varying,YES,
+AspNetUsers,NormalizedEmail,character varying,YES,
+AspNetUsers,EmailConfirmed,boolean,NO,
+AspNetUsers,PasswordHash,text,YES,
+AspNetUsers,SecurityStamp,text,YES,
+AspNetUsers,ConcurrencyStamp,text,YES,
+AspNetUsers,PhoneNumber,text,YES,
+AspNetUsers,PhoneNumberConfirmed,boolean,NO,
+AspNetUsers,TwoFactorEnabled,boolean,NO,
+AspNetUsers,LockoutEnd,timestamp with time zone,YES,
+AspNetUsers,LockoutEnabled,boolean,NO,
+AspNetUsers,AccessFailedCount,integer,NO,
+AspNetUsers,ComplementHours,boolean,NO,false
+AspNetUsers,HiredHours,integer,NO,"0"
+AspNetUsers,LawApply,boolean,NO,false
+AspNetUsers,ExtraHours,boolean,NO,false
+AspNetUsers,CantPartTimeSchedule,integer,NO,"0"
+AspNetUsers,PasswordResetToken,text,YES,
+AspNetUsers,PasswordResetTokenExpiration,timestamp with time zone,YES,
+AuditLogs,Id,uuid,NO,gen_random_uuid()
+AuditLogs,EntityName,character varying,NO,
+AuditLogs,EntityId,character varying,NO,
+AuditLogs,OperationType,integer,NO,
+AuditLogs,OldValues,jsonb,YES,
+AuditLogs,NewValues,jsonb,YES,
+AuditLogs,ChangedColumns,character varying,YES,
+AuditLogs,UserId,uuid,YES,
+AuditLogs,UserName,character varying,YES,
+AuditLogs,IpAddress,character varying,YES,
+AuditLogs,UserAgent,character varying,YES,
+AuditLogs,RequestPath,character varying,YES,
+AuditLogs,HttpMethod,character varying,YES,
+AuditLogs,Timestamp,timestamp with time zone,NO,CURRENT_TIMESTAMP
+AuditLogs,IsSuccess,boolean,NO,
+AuditLogs,ErrorMessage,character varying,YES,
+EmployeeScheduleExceptions,Id,uuid,NO,gen_random_uuid()
+EmployeeScheduleExceptions,UserId,uuid,NO,
+EmployeeScheduleExceptions,Date,date,NO,
+EmployeeScheduleExceptions,RestrictionType,integer,NO,
+EmployeeScheduleExceptions,IsAdditionalRestriction,boolean,NO,
+EmployeeScheduleExceptions,AvailableFrom,interval,YES,
+EmployeeScheduleExceptions,AvailableUntil,interval,YES,
+EmployeeScheduleExceptions,Block1Start,interval,YES,
+EmployeeScheduleExceptions,Block1End,interval,YES,
+EmployeeScheduleExceptions,Block2Start,interval,YES,
+EmployeeScheduleExceptions,Block2End,interval,YES,
+EmployeeScheduleExceptions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+EmployeeScheduleRestrictions,Id,uuid,NO,gen_random_uuid()
+EmployeeScheduleRestrictions,UserId,uuid,NO,
+EmployeeScheduleRestrictions,DayOfWeek,integer,NO,
+EmployeeScheduleRestrictions,RestrictionType,integer,NO,
+EmployeeScheduleRestrictions,AvailableFrom,interval,YES,
+EmployeeScheduleRestrictions,AvailableUntil,interval,YES,
+EmployeeScheduleRestrictions,Block1Start,interval,YES,
+EmployeeScheduleRestrictions,Block1End,interval,YES,
+EmployeeScheduleRestrictions,Block2Start,interval,YES,
+EmployeeScheduleRestrictions,Block2End,interval,YES,
+EmployeeScheduleRestrictions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+EmployeeShiftTypeRestrictions,Id,uuid,NO,gen_random_uuid()
+EmployeeShiftTypeRestrictions,UserId,uuid,NO,
+EmployeeShiftTypeRestrictions,DayOfWeek,integer,NO,
+EmployeeShiftTypeRestrictions,ShiftTypeId,uuid,NO,
+EmployeeShiftTypeRestrictions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+HireTypes,Id,uuid,NO,gen_random_uuid()
+HireTypes,Name,text,NO,
+HireTypes,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+HybridWorkstations,Id,uuid,NO,gen_random_uuid()
+HybridWorkstations,WorkstationAId,uuid,NO,
+HybridWorkstations,WorkstationBId,uuid,NO,
+HybridWorkstations,Description,text,YES,
+HybridWorkstations,IsDeleted,boolean,NO,
+HybridWorkstations,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+HybridWorkstations,WorkstationCId,uuid,YES,
+HybridWorkstations,WorkstationDId,uuid,YES,
+LawRestrictions,Id,uuid,NO,gen_random_uuid()
+LawRestrictions,Description,text,NO,
+LawRestrictions,CantHours,integer,NO,
+LawRestrictions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+Licenses,Id,uuid,NO,
+Licenses,UserId,uuid,NO,
+Licenses,Reason,text,NO,
+Licenses,StartDate,timestamp with time zone,NO,
+Licenses,EndDate,timestamp with time zone,NO,
+Licenses,IsHalfDay,boolean,NO,
+Licenses,HalfPeriod,text,YES,
+Licenses,DaysRequested,integer,YES,
+Licenses,Observation,text,YES,
+Licenses,IsDeleted,boolean,NO,
+Licenses,DateCreated,timestamp with time zone,NO,
+Permissions,Id,uuid,NO,gen_random_uuid()
+Permissions,Name,text,NO,
+Permissions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+RolePermissions,Id,uuid,NO,gen_random_uuid()
+RolePermissions,PermissionId,uuid,NO,
+RolePermissions,RoleId,uuid,NO,
+RolePermissions,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+ScheduleGaps,Id,uuid,NO,gen_random_uuid()
+ScheduleGaps,Date,date,NO,
+ScheduleGaps,WorkstationId,uuid,NO,
+ScheduleGaps,StartTime,time without time zone,NO,
+ScheduleGaps,EndTime,time without time zone,NO,
+ScheduleGaps,GapExplanation,text,YES,
+ScheduleGaps,GapCategory,text,YES,
+ScheduleGaps,Token,text,YES,
+ScheduleGaps,CreatedAt,timestamp with time zone,NO,now()
+ScheduleGaps,IsPostAi,boolean,NO,false
+ScheduleQualityConfig,Id,uuid,NO,gen_random_uuid()
+ScheduleQualityConfig,Name,text,NO,
+ScheduleQualityConfig,Version,integer,NO,
+ScheduleQualityConfig,IsActive,boolean,NO,false
+ScheduleQualityConfig,Weights,jsonb,NO,
+ScheduleQualityConfig,Params,jsonb,NO,
+ScheduleQualityConfig,Notes,text,YES,
+ScheduleQualityConfig,CreatedAt,timestamp with time zone,NO,now()
+ScheduleQualityShiftScores,Id,uuid,NO,
+ScheduleQualityShiftScores,Token,text,NO,
+ScheduleQualityShiftScores,DemandId,uuid,YES,
+ScheduleQualityShiftScores,Date,date,NO,
+ScheduleQualityShiftScores,WorkstationName,text,YES,
+ScheduleQualityShiftScores,StartTime,interval,NO,
+ScheduleQualityShiftScores,EndTime,interval,NO,
+ScheduleQualityShiftScores,Demanded,numeric,NO,"0"
+ScheduleQualityShiftScores,Covered,numeric,NO,"0"
+ScheduleQualityShiftScores,Unmet,numeric,NO,"0"
+ScheduleQualityShiftScores,CoverageScore,numeric,NO,"100"
+ScheduleQualityShiftScores,FairnessScore,numeric,NO,"100"
+ScheduleQualityShiftScores,RulesScore,numeric,NO,"100"
+ScheduleQualityShiftScores,Score,numeric,NO,"100"
+ScheduleQualityShiftScores,Metrics,jsonb,NO,'{}'::jsonb
+ScheduleQualityShiftScores,ConfigSnapshot,jsonb,YES,
+ScheduleQualityShiftScores,DateCreated,timestamp without time zone,NO,now()
+ScheduleQualityShiftScores,IsPostAi,boolean,NO,false
+ScheduleRuleValidations,Id,uuid,NO,gen_random_uuid()
+ScheduleRuleValidations,Token,text,NO,
+ScheduleRuleValidations,WeekStart,date,YES,
+ScheduleRuleValidations,WeekEnd,date,YES,
+ScheduleRuleValidations,TotalViolaciones,integer,NO,"0"
+ScheduleRuleValidations,ViolacionesCriticas,integer,NO,"0"
+ScheduleRuleValidations,ViolacionesAltas,integer,NO,"0"
+ScheduleRuleValidations,ViolacionesMedias,integer,NO,"0"
+ScheduleRuleValidations,ViolacionesBajas,integer,NO,"0"
+ScheduleRuleValidations,EmpleadosValidados,integer,NO,"0"
+ScheduleRuleValidations,DiasValidados,integer,NO,"0"
+ScheduleRuleValidations,ScheduleValido,boolean,NO,true
+ScheduleRuleValidations,IsPostAi,boolean,NO,false
+ScheduleRuleValidations,Detalle,jsonb,YES,
+ScheduleRuleValidations,CreatedAt,timestamp without time zone,YES,now()
+ScheduleSuggestions,Id,uuid,NO,
+ScheduleSuggestions,Token,character varying,NO,
+ScheduleSuggestions,WeekStart,date,NO,
+ScheduleSuggestions,WeekEnd,date,NO,
+ScheduleSuggestions,Tipo,character varying,NO,
+ScheduleSuggestions,Prioridad,character varying,NO,
+ScheduleSuggestions,Titulo,character varying,NO,
+ScheduleSuggestions,Descripcion,text,YES,
+ScheduleSuggestions,ImpactoEsperado,jsonb,YES,
+ScheduleSuggestions,MejoraEstimada,numeric,YES,
+ScheduleSuggestions,Detalles,jsonb,YES,
+ScheduleSuggestions,EmpleadosInvolucrados,jsonb,YES,
+ScheduleSuggestions,WorkstationsAfectadas,jsonb,YES,
+ScheduleSuggestions,DiasAfectados,jsonb,YES,
+ScheduleSuggestions,AccionesConcretas,jsonb,YES,
+ScheduleSuggestions,Implementada,boolean,YES,false
+ScheduleSuggestions,FechaImplementacion,timestamp without time zone,YES,
+ScheduleSuggestions,CreatedAt,timestamp without time zone,YES,CURRENT_TIMESTAMP
+ScheduleSuggestions,IsPostAi,boolean,NO,false
+Schedules,Id,uuid,NO,gen_random_uuid()
+Schedules,Date,date,NO,
+Schedules,UserId,uuid,NO,
+Schedules,WorkstationId,uuid,YES,
+Schedules,StartTime,interval,YES,
+Schedules,EndTime,interval,YES,
+Schedules,Observation,text,YES,
+Schedules,IsDeleted,boolean,NO,
+Schedules,IdUpdate,text,YES,
+Schedules,DateUpdate,timestamp with time zone,YES,
+Schedules,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+Schedules,Notified,boolean,NO,false
+Schedules,Token,text,YES,
+ShiftTypes,Id,uuid,NO,gen_random_uuid()
+ShiftTypes,Name,text,NO,
+ShiftTypes,Description,text,NO,
+ShiftTypes,IsActive,boolean,NO,
+ShiftTypes,Structure,integer,NO,
+ShiftTypes,Block1Start,interval,YES,
+ShiftTypes,Block1lastStart,interval,YES,
+ShiftTypes,Block2Start,interval,YES,
+ShiftTypes,Block2lastStart,interval,YES,
+ShiftTypes,finishNextDay,boolean,NO,
+ShiftTypes,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+SigningCofigurations,Id,uuid,NO,gen_random_uuid()
+SigningCofigurations,email,text,NO,
+SigningCofigurations,description,text,YES,
+SigningCofigurations,isAdminMail,boolean,NO,
+SigningCofigurations,WorkArea,text,NO,
+SigningCofigurations,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+Signings,Id,uuid,NO,gen_random_uuid()
+Signings,UserId,uuid,NO,
+Signings,Date,date,NO,
+Signings,StartTime,time without time zone,NO,
+Signings,EndTime,time without time zone,YES,
+Signings,TipoFichaje,integer,NO,
+Signings,Observaciones,text,NO,
+Signings,LastUpdateUserId,uuid,YES,
+Signings,UpdatedAt,timestamp with time zone,YES,
+Signings,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+UserAbsenteeisms,Id,uuid,NO,gen_random_uuid()
+UserAbsenteeisms,UserId,uuid,NO,
+UserAbsenteeisms,AbsenteeismTypeId,uuid,NO,
+UserAbsenteeisms,StartDate,date,NO,
+UserAbsenteeisms,EndDate,date,YES,
+UserAbsenteeisms,Observation,text,YES,
+UserAbsenteeisms,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+UserActivityLogs,Id,uuid,NO,gen_random_uuid()
+UserActivityLogs,UserId,uuid,NO,
+UserActivityLogs,Action,text,NO,
+UserActivityLogs,IpAddress,text,NO,
+UserActivityLogs,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+UserShifts,Id,uuid,NO,gen_random_uuid()
+UserShifts,UserId,uuid,NO,
+UserShifts,Day,integer,NO,
+UserShifts,Structure,integer,NO,
+UserShifts,Block1Start,interval,YES,
+UserShifts,Block1lastStart,interval,YES,
+UserShifts,Block2Start,interval,YES,
+UserShifts,Block2lastStart,interval,YES,
+UserShifts,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+UserWorkstations,Id,uuid,NO,gen_random_uuid()
+UserWorkstations,UserId,uuid,NO,
+UserWorkstations,WorkstationId,uuid,NO,
+UserWorkstations,Coverage,integer,NO,
+UserWorkstations,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+UserWorkstations,IsDelete,boolean,NO,false
+UserWorkstations,Preference,integer,NO,"0"
+WorkAreas,Id,uuid,NO,gen_random_uuid()
+WorkAreas,Name,text,NO,
+WorkAreas,IsActive,boolean,NO,
+WorkAreas,IsDeleted,boolean,NO,
+WorkAreas,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+WorkAreas,Color,text,NO,''::text
+WorkstationDemandTemplates,Id,uuid,NO,gen_random_uuid()
+WorkstationDemandTemplates,Name,text,NO,
+WorkstationDemandTemplates,IsActive,boolean,NO,
+WorkstationDemandTemplates,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+WorkstationDemandTemplates,EndDate,date,NO,'-infinity'::date
+WorkstationDemandTemplates,StartDate,date,NO,'-infinity'::date
+WorkstationDemands,Id,uuid,NO,gen_random_uuid()
+WorkstationDemands,TemplateId,uuid,NO,
+WorkstationDemands,WorkstationId,uuid,NO,
+WorkstationDemands,Day,integer,NO,
+WorkstationDemands,StartTime,interval,NO,
+WorkstationDemands,EndTime,interval,NO,
+WorkstationDemands,EffortRequired,double precision,NO,
+WorkstationDemands,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP
+Workstations,Id,uuid,NO,gen_random_uuid()
+Workstations,Name,text,NO,
+Workstations,IsActive,boolean,NO,
+Workstations,IsDeleted,boolean,NO,
+Workstations,WorkAreaId,uuid,NO,
+Workstations,DateCreated,timestamp with time zone,NO,CURRENT_TIMESTAMP

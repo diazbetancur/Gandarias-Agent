@@ -487,20 +487,35 @@ class ExplicadorHuecosService:
         return acciones
 
     # ---------- persistir en ScheduleGaps ----------
+    def _ensure_is_post_ai_column(self):
+        """Agrega columna IsPostAi si no existe (auto-migración)."""
+        try:
+            self.cur.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE {self.table_name} ADD COLUMN "IsPostAi" boolean NOT NULL DEFAULT false;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """)
+        except Exception:
+            pass
+
     def guardar_schedule_gaps(
         self,
         explicaciones: List[Dict[str, Any]],
         token: str,
+        is_post_ai: bool = False,
     ) -> int:
         if not explicaciones:
             self._log("[HU1.1][DB] 0 explicaciones -> no inserto nada.")
             return 0
 
+        self._ensure_is_post_ai_column()
+
         sql = f"""
             INSERT INTO {self.table_name}
-              ("Id","Date","WorkstationId","StartTime","EndTime","GapExplanation","GapCategory","Token","CreatedAt")
+              ("Id","Date","WorkstationId","StartTime","EndTime","GapExplanation","GapCategory","Token","IsPostAi","CreatedAt")
             VALUES
-              (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+              (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
 
         inserted = 0
@@ -510,7 +525,6 @@ class ExplicadorHuecosService:
             wsid = exp["workstation"].get("id")
             wsname = exp["workstation"].get("nombre")
 
-            # Si no tengo wsid, intento resolver (otra vez) por nombre
             if not wsid and wsname:
                 wsid = self._resolve_wsid_by_name(wsname)
 
@@ -521,7 +535,6 @@ class ExplicadorHuecosService:
             ini = datetime.fromisoformat(exp["slot"]["inicio"])
             fin = datetime.fromisoformat(exp["slot"]["fin"])
 
-            # Usamos interval (timedelta) igual que Schedules
             st_td = timedelta(hours=ini.hour, minutes=ini.minute)
             en_td = timedelta(hours=fin.hour, minutes=fin.minute)
 
@@ -538,12 +551,13 @@ class ExplicadorHuecosService:
                     payload,
                     exp.get("categoria"),
                     token,
+                    bool(is_post_ai),
                     now_dt,
                 ),
             )
             inserted += 1
 
-        self._log(f"[HU1.1][DB] inserted={inserted} rows into {self.table_name} token={token}")
+        self._log(f"[HU1.1][DB] inserted={inserted} rows into {self.table_name} token={token} is_post_ai={is_post_ai}")
         return inserted
 
     # ---------- Orquestación ----------
@@ -552,8 +566,9 @@ class ExplicadorHuecosService:
         agenda_result: Any,
         ctx: ContextoExplicacion,
         token: str,
+        is_post_ai: bool = False,
     ) -> List[Dict[str, Any]]:
-        self._log(f"[HU1.1] ==== START generar_y_guardar token={token} ====")
+        self._log(f"[HU1.1] ==== START generar_y_guardar token={token} is_post_ai={is_post_ai} ====")
         total_unmet = (agenda_result.get("summary") or {}).get("total_unmet") if isinstance(agenda_result, dict) else None
         self._log(f"[HU1.1] summary.total_unmet={total_unmet}")
 
@@ -563,6 +578,6 @@ class ExplicadorHuecosService:
         explicaciones = [self.explicar_hueco(h, ctx) for h in huecos]
         self._log(f"[HU1.1] explicaciones_generadas={len(explicaciones)}")
 
-        inserted = self.guardar_schedule_gaps(explicaciones, token=token)
+        inserted = self.guardar_schedule_gaps(explicaciones, token=token, is_post_ai=is_post_ai)
         self._log(f"[HU1.1] ==== END generar_y_guardar inserted={inserted} ====")
         return explicaciones
