@@ -73,7 +73,16 @@ class ScheduleGenerationError(Exception): ...
 
 class Emp:
     def __init__(self, row: Tuple):
-        self.id, self.name, self.split = row
+        (
+            self.id,
+            self.name,
+            self.split,
+            self.hired_hours,
+            self.complement_hours,
+            self.extra_hours,
+            self.law_apply,
+            self.cant_part_time_schedule,
+        ) = row
         self.roles: Set = set()
         self.day_off: Set[int] = set()
         self.window = defaultdict(list)
@@ -87,23 +96,37 @@ class Emp:
         self.shift_type_windows = defaultdict(list)
         self.us_two_starts_dow: Set[int] = set()
         self.user_shift_anchor_by_date = {}
+        self.roles_originales: Set = set()
 
-    def can(self, ws): return ws in self.roles
-    def off(self, d: date) -> bool: return d.weekday() in self.day_off
-    def absent_day(self, d: date) -> bool: return d in self.absent
+    def can(self, ws):
+        return ws in self.roles
+
+    def off(self, d: date) -> bool:
+        return d.weekday() in self.day_off
+
+    def absent_day(self, d: date) -> bool:
+        return d in self.absent
+
+    def weekly_hours_limit(self):
+        hired = int(self.hired_hours or 0)
+        if hired <= 0 or bool(self.extra_hours) or bool(self.complement_hours):
+            return None
+        return hired * 60
 
     def available(self, d: date, s: time, e: time) -> bool:
-        if self.off(d) or self.absent_day(d): return False
-        if not self.day_off and not self.window and not self.exc: return True
+        if self.off(d) or self.absent_day(d):
+            return False
+        if not self.day_off and not self.window and not self.exc:
+            return True
         win = self.exc.get(d) or self.window.get(d.weekday())
-        if not win: return False
+        if not win:
+            return False
         end = e if e != time(0, 0) else time(23, 59)
         for a, b in win:
             b2 = b if b != time(0, 0) else time(23, 59)
-            if s >= a and end <= b2: return True
+            if s >= a and end <= b2:
+                return True
         return False
-
-
 class Demand:
     def __init__(self, row: Tuple):
         (self.id, rdate, self.wsid, self.wsname, self.start, self.end, need) = row
@@ -116,10 +139,33 @@ class Demand:
         self.need = 1 if self.is_hybrid_05 else (int(round(self.raw_need)) if self.raw_need > 0 else 0)
         self.slot_index = 0
         self.shift_type = None
+        self.observation_override = None
+        self.hybrid_group_id = None
+        self.hybrid_partner_wsid = None
 
     def __repr__(self):
         return (f"Demand(id={self.id}, date={self.date}, ws={self.wsname}, "
                 f"{self.start}-{self.end}, need={self.need}, hyb={self.is_hybrid_05})")
+
+
+class HybridDemandGroup:
+    def __init__(self, dm_a: Demand, dm_b: Demand, description: str = ""):
+        self.id = f"HYB::{dm_a.id}::{dm_b.id}"
+        self.date = dm_a.date
+        self.start = dm_a.start
+        self.end = dm_a.end
+        self.wsid_a = dm_a.wsid
+        self.wsid_b = dm_b.wsid
+        self.wsname_a = dm_a.wsname
+        self.wsname_b = dm_b.wsname
+        self.dm_a = dm_a
+        self.dm_b = dm_b
+        self.demands = [dm_a, dm_b]
+        self.description = description or f"{dm_a.wsname} + {dm_b.wsname}"
+        self.duration_min = _seg_min(dm_a.start, dm_a.end)
+
+    def pair_key(self):
+        return frozenset({str(self.wsid_a), str(self.wsid_b)})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -336,90 +382,115 @@ def plan_usershift_day_modes(emps, demands, week):
 # HYBRID 0.5 POSTPROCESS (portado del viejo agenda.py)
 # ═══════════════════════════════════════════════════════════════════
 
-def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, overrides):
-    """
-    Post-proceso para puestos híbridos (EffortRequired = 0.5).
-    Un empleado cubre 2 workstations distintos en el mismo bloque horario.
-    """
-    hybrid_demand_ids = set()
+def fetch_hybrid_pairs(cur):
+    pairs = {}
+    ws_to_partners = defaultdict(set)
+    rows = fetchall(cur, '''
+        SELECT "Id", "WorkstationAId", "WorkstationBId", "WorkstationCId", "WorkstationDId", COALESCE("Description", '')
+        FROM "Management"."HybridWorkstations"
+        WHERE COALESCE("IsDeleted", false) = false
+    ''')
+    for hid, a, b, c, d, desc in rows:
+        for x, y in ((a, b), (c, d)):
+            if not x or not y:
+                continue
+            key = frozenset({str(x), str(y)})
+            pairs[key] = {"hybrid_id": str(hid), "description": desc or "HYB"}
+            ws_to_partners[str(x)].add(str(y))
+            ws_to_partners[str(y)].add(str(x))
+    return pairs, ws_to_partners
+
+
+def build_hybrid_groups(demands, hybrid_pairs):
+    buckets = defaultdict(list)
     for dm in demands:
         if getattr(dm, "is_hybrid_05", False):
-            hybrid_demand_ids.add(dm.id)
+            buckets[(dm.date, _t2m(dm.start), _t2m(_end_eff(dm.end)))].append(dm)
 
-    if not hybrid_demand_ids:
-        return
+    groups = []
+    used_ids = set()
+    for (_day, _s, _e), items in buckets.items():
+        items = [x for x in items if x.id not in used_ids]
+        if len(items) < 2:
+            continue
+        items.sort(key=lambda d: (str(d.wsid), str(d.id)))
+        for i, dm_a in enumerate(items):
+            if dm_a.id in used_ids:
+                continue
+            match = None
+            desc = "HYB"
+            for j in range(i + 1, len(items)):
+                dm_b = items[j]
+                if dm_b.id in used_ids or str(dm_a.wsid) == str(dm_b.wsid):
+                    continue
+                key = frozenset({str(dm_a.wsid), str(dm_b.wsid)})
+                if key in hybrid_pairs:
+                    match = dm_b
+                    desc = hybrid_pairs[key].get("description") or "HYB"
+                    break
+            if match is None:
+                continue
+            group = HybridDemandGroup(dm_a, match, desc)
+            dm_a.hybrid_group_id = group.id
+            match.hybrid_group_id = group.id
+            dm_a.hybrid_partner_wsid = match.wsid
+            match.hybrid_partner_wsid = dm_a.wsid
+            groups.append(group)
+            used_ids.add(dm_a.id)
+            used_ids.add(match.id)
+    return groups
 
-    # Limpiar asignaciones híbridas previas
-    for day in list(sched.keys()):
-        sched[day] = [(emp, dm) for (emp, dm) in sched[day]
-                      if dm.id not in hybrid_demand_ids]
 
-    for dm_id in hybrid_demand_ids:
-        if dm_id in coverage_stats:
-            coverage_stats[dm_id]["met"] = 0
-            coverage_stats[dm_id]["covered"] = 0
-            coverage_stats[dm_id]["unmet"] = coverage_stats[dm_id]["demand"].need
+def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, overrides, hybrid_pairs=None, reglas=None):
+    hybrid_pairs = hybrid_pairs or {}
+    if not hybrid_pairs:
+        return 0
 
-    # Agrupar híbridos por (día, workstation)
-    demands_by_day_ws = defaultdict(list)
-    for dm in demands:
-        if not getattr(dm, "is_hybrid_05", False): continue
-        demands_by_day_ws[(dm.date, dm.wsname)].append(dm)
-    for k in demands_by_day_ws:
-        demands_by_day_ws[k].sort(key=lambda d: _t2m(d.start))
+    from services.ai_scheduler import ValidadorReglasDuras, EstadoEmpleado
 
-    days_with_hybrids = set(dm.date for dm in demands if getattr(dm, "is_hybrid_05", False))
-    MIN_BLK = MIN_SHIFT_DURATION_HOURS * 60
-    MAX_BLK = MAX_HOURS_PER_DAY * 60
+    reglas = reglas or dict(REGLAS_DURAS_DEFAULTS)
+    val = ValidadorReglasDuras(reglas)
+    estados = {str(e.id): EstadoEmpleado(emp_id=str(e.id)) for e in emps}
+    for d in week:
+        for emp, dm in sched.get(d, []):
+            if getattr(dm, "wsid", None) is None:
+                continue
+            estados[str(emp.id)].registrar(d, str(dm.wsid), _t2m(dm.start), _t2m(_end_eff(dm.end)))
 
-    for day in sorted(days_with_hybrids):
-        workstations = set()
-        for (d, ws), dms in demands_by_day_ws.items():
-            if d == day: workstations.add(ws)
-        if len(workstations) < 2: continue
-
-        # Intentar parear workstations
-        ws_list = sorted(workstations)
-        from itertools import combinations
-        for ws_a, ws_b in combinations(ws_list, 2):
-            dms_a = demands_by_day_ws.get((day, ws_a), [])
-            dms_b = demands_by_day_ws.get((day, ws_b), [])
-            if not dms_a or not dms_b: continue
-
-            # Calcular rango total
-            all_start = min(_t2m(d.start) for d in dms_a + dms_b)
-            all_end = max(_t2m(_end_eff(d.end)) for d in dms_a + dms_b)
-            total_dur = all_end - all_start
-            if total_dur < MIN_BLK or total_dur > MAX_BLK: continue
-
-            # Buscar empleado que pueda ambos puestos
-            wsid_a = dms_a[0].wsid
-            wsid_b = dms_b[0].wsid
-            for emp in emps:
-                if not emp.can(wsid_a) or not emp.can(wsid_b): continue
-                if emp.off(day) or emp.absent_day(day): continue
-                if not emp.available(day, _m2t(all_start), _m2t(all_end)): continue
-
-                # Verificar que no esté ya asignado a esas horas
-                existing = [(e, dm) for e, dm in sched.get(day, []) if str(e.id) == str(emp.id)]
-                existing_ivs = [(_t2m(dm.start), _t2m(_end_eff(dm.end)))
-                                for _, dm in existing if dm.wsid]
-                if _has_overlap(existing_ivs, all_start, all_end): continue
-
-                # Asignar mitad a cada ws
-                for dm_a in dms_a:
-                    if coverage_stats.get(dm_a.id, {}).get("unmet", 0) > 0:
-                        sched[day].append((emp, dm_a))
-                        coverage_stats[dm_a.id]["covered"] += 1
-                        coverage_stats[dm_a.id]["met"] += 1
-                        coverage_stats[dm_a.id]["unmet"] = max(0, coverage_stats[dm_a.id]["unmet"] - 1)
-                for dm_b in dms_b:
-                    if coverage_stats.get(dm_b.id, {}).get("unmet", 0) > 0:
-                        sched[day].append((emp, dm_b))
-                        coverage_stats[dm_b.id]["covered"] += 1
-                        coverage_stats[dm_b.id]["met"] += 1
-                        coverage_stats[dm_b.id]["unmet"] = max(0, coverage_stats[dm_b.id]["unmet"] - 1)
-                break  # Un empleado por par
+    inserted = 0
+    for grp in build_hybrid_groups(demands, hybrid_pairs):
+        if coverage_stats.get(grp.dm_a.id, {}).get("unmet", 0) <= 0 and coverage_stats.get(grp.dm_b.id, {}).get("unmet", 0) <= 0:
+            continue
+        best = None
+        best_score = -1.0
+        for emp in emps:
+            ok, _ = val.puede_asignar_hibrido(emp, grp, grp.date, estados[str(emp.id)], overrides)
+            if not ok:
+                continue
+            score = 0.3 + (0.2 if grp.date in estados[str(emp.id)].dias_trabajados else 0.0)
+            if emp.can(grp.wsid_a):
+                score += 0.25
+            if emp.can(grp.wsid_b):
+                score += 0.25
+            if score > best_score:
+                best = emp
+                best_score = score
+        if best is None:
+            continue
+        grp.dm_a.observation_override = "HYB|BT"
+        grp.dm_b.observation_override = "HYB|BT"
+        sched[grp.date].append((best, grp.dm_a))
+        sched[grp.date].append((best, grp.dm_b))
+        estados[str(best.id)].registrar(grp.date, f"HYB:{grp.wsid_a}|{grp.wsid_b}", _t2m(grp.start), _t2m(_end_eff(grp.end)))
+        for dm in (grp.dm_a, grp.dm_b):
+            if dm.id in coverage_stats and coverage_stats[dm.id]["unmet"] > 0:
+                coverage_stats[dm.id]["covered"] += 1
+                coverage_stats[dm.id]["met"] += 1
+                coverage_stats[dm.id]["unmet"] = max(0, coverage_stats[dm.id]["unmet"] - 1)
+        inserted += 1
+    if ASCII_LOGS:
+        print(f"[HYB-FALLBACK] grupos cerrados={inserted}")
+    return inserted
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -497,14 +568,20 @@ def load_data(week_start: date):
         ]
         demands = coalesce_demands(demands, tolerate_gap_min=0)
         demands = normalize_by_max_need_profile(demands)
-        print(f"[DATA] {len(demands)} demands")
+        hybrid_pairs, hybrid_partner_map = fetch_hybrid_pairs(cur)
+        print(f"[DATA] {len(demands)} demands | hybrid_pairs={len(hybrid_pairs)}")
 
         # ── EMPLEADOS (CORREGIDO: ComplementHours, no IsSplitShift) ──
         emps_map = {
             r[0]: Emp(r) for r in fetchall(cur, '''
                 SELECT "Id",
                        COALESCE("FirstName",'')||' '||COALESCE("LastName",'') AS name,
-                       COALESCE("ComplementHours", TRUE)
+                       COALESCE("ComplementHours", TRUE),
+                       COALESCE("HiredHours", 0),
+                       COALESCE("ComplementHours", false),
+                       COALESCE("ExtraHours", false),
+                       COALESCE("LawApply", true),
+                       COALESCE("CantPartTimeSchedule", 0)
                 FROM "Management"."AspNetUsers"
                 WHERE "IsActive" AND NOT "IsDelete"
                 ORDER BY "LastName","FirstName","Id"
@@ -828,12 +905,12 @@ def load_data(week_start: date):
             "min_gap_split_horas": MIN_HOURS_BETWEEN_SPLIT,
             "max_horas_por_dia": MAX_HOURS_PER_DAY,
             "dias_descanso_semana": MIN_DAYS_OFF,
-            "max_dias_trabajo_semana": MAX_DAYS_PER_WEEK,
+            "max_dias_trabajo_semana": max(1, 7 - MIN_DAYS_OFF),
             "max_bloques_por_dia": 2,
         }
 
         print(f"[DATA] {len(emps)} empleados, {len(demands)} demands OK")
-        return emps, demands, (tpl_id, tpl_name), week, shift_types, reglas
+        return emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -888,7 +965,7 @@ def coalesce_employee_day_workstation(assigns_day):
 # ═══════════════════════════════════════════════════════════════════
 
 def generate_ai(week_start: date):
-    emps, demands, (tpl_id, tpl_name), week, shift_types, reglas = load_data(week_start)
+    emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map = load_data(week_start)
 
     # ── PLAN USERSHIFT MODES (NUEVO) ──
     overrides, usershift_plan = plan_usershift_day_modes(emps, demands, week)
@@ -905,15 +982,22 @@ def generate_ai(week_start: date):
         ai_svc._modelo = ModeloPatrones()
     modelo = ai_svc.modelo
 
-    # ── GENERAR SCHEDULE (con overrides) ──
+    # ── GENERAR SCHEDULE (con overrides + híbridos nativos) ──
+    hybrid_groups = build_hybrid_groups(demands, hybrid_pairs)
+    print(f"[AI] hybrid_groups construidos={len(hybrid_groups)}")
     generator = AIScheduleGenerator(modelo=modelo, reglas=reglas, debug=True)
     sched, coverage_stats, days_off_diag = generator.generar(
         emps=emps, demands=demands, week=week,
-        overrides=overrides,  # ← AHORA se pasan los overrides
+        overrides=overrides,
+        hybrid_groups=hybrid_groups,
+        min_coverage_pct=80.0,
     )
 
-    # ── HYBRID 0.5 POSTPROCESS (NUEVO) ──
-    apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, overrides)
+    # ── HYBRID 0.5 FALLBACK (solo remata huecos restantes) ──
+    apply_hybrid_05_postprocess(
+        emps, demands, week, sched, coverage_stats, overrides,
+        hybrid_pairs=hybrid_pairs, reglas=reglas,
+    )
 
     # ── AUSENCIAS ──
     for emp in emps:
@@ -949,7 +1033,7 @@ def generate_ai(week_start: date):
             "days_off_violations": days_off_diag,
             "coverage": round((total_cov / total_req) * 100, 1) if total_req else 100,
             "flexible_mode": True,
-            "solver": "ai_pattern_v4.1",
+            "solver": "ai_pattern_v5_hybrid_native",
         },
         "coverage_details": {
             d_id: {
@@ -975,7 +1059,9 @@ def generate_ai(week_start: date):
             last_day = latest_end_by_day.get(day_key)
             cur_end_min = _t2m(_end_eff(dm.end))
 
-            if dm.wsid is None:
+            if getattr(dm, "observation_override", None):
+                obs = dm.observation_override
+            elif dm.wsid is None:
                 obs = emp.abs_reason.get(d, "ABS")
             elif ws_latest is not None and cur_end_min == ws_latest:
                 obs = "C"
@@ -1106,7 +1192,7 @@ def save():
                     agenda_result=res,
                     ctx=ctx,
                     token=token,
-                    is_post_ai=True,
+                    is_post_ai=False,
                 )
                 inserted_gaps = len(explicaciones)
                 print(f"[HU1.1] {inserted_gaps} gaps guardados en BD")
@@ -1131,7 +1217,7 @@ def save():
                         for cs in coverage_stats.values()]},
                     sched=sched, emps=emps,
                     coverage_stats=coverage_stats,
-                    is_post_ai=True,
+                    is_post_ai=False,
                 )
                 inserted_quality = quality_result.get("inserted", 0)
                 print(f"[HU1.2] Score={quality_result.get('score', 0):.2f}, {inserted_quality} registros en BD")
@@ -1158,7 +1244,7 @@ def save():
                     token=token,
                     week_start=ws,
                     week_end=we,
-                    is_post_ai=True,
+                    is_post_ai=False,
                 )
                 print(f"[HU1.3] {len(sugerencias_generadas)} sugerencias guardadas en BD")
                 cur.execute("RELEASE SAVEPOINT hu13")
@@ -1176,7 +1262,7 @@ def save():
                 val_svc = ValidadorReglasService(cursor=cur, debug=True)
                 val_result = val_svc.validar_y_guardar(
                     sched=sched, token=token, week_start=ws, week_end=we,
-                    emps=emps, is_post_ai=True)
+                    emps=emps, is_post_ai=False)
                 print(f"[HU1.6] {val_result.total_violaciones} violaciones")
                 res["summary"]["hu16_violations"] = val_result.total_violaciones
                 res["summary"]["hu16_schedule_valid"] = val_result.schedule_valido
@@ -1226,7 +1312,9 @@ def save():
                         day_key = d.isoformat()
                         ws_latest = (latest_end_by_wsid.get(day_key, {}) or {}).get(str(wsid))
                         last_day = latest_end_by_day.get(day_key)
-                        if ws_latest is not None and e_min == ws_latest: obs = "C"
+                        if any(getattr(src_dm, "observation_override", None) for src_dm in src_dms):
+                            obs = next((getattr(src_dm, "observation_override", None) for src_dm in src_dms if getattr(src_dm, "observation_override", None)), "HYB|BT")
+                        elif ws_latest is not None and e_min == ws_latest: obs = "C"
                         elif last_day is not None and e_min == last_day: obs = ""
                         else: obs = "BT"
                         cur.execute('''
@@ -1244,45 +1332,31 @@ def save():
             cur.execute("SAVEPOINT hu14")
             try:
                 from services.aprendizaje_historico import AprendizajeHistoricoService
-
                 ai_post = AprendizajeHistoricoService(cur, debug=True)
                 t_start = ws - timedelta(days=84)
-
+                # v4.2: entrenar_desde_bd ahora lee también Gaps, Quality y Suggestions
                 ai_post.entrenar_desde_bd(t_start, we)
                 mid = ai_post.guardar_modelo(nombre="auto", version=f"auto-{ws.isoformat()}")
-
-                coverage_pct = float(res.get("coverage_pct", 0))
-                notes_parts = [f"post-save {token}"]
-                if quality_result:
-                    notes_parts.append(f"score={quality_result.get('score', 0):.1f}")
-                notes_parts.append(f"gaps={inserted_gaps}")
-                notes_parts.append(f"sugs={len(sugerencias_generadas) if sugerencias_generadas else 0}")
-
-                ai_post.registrar_training_history(
-                    model_id=mid,
-                    data_start=t_start,
-                    data_end=we,
-                    notes=" | ".join(notes_parts),
-                    coverage_improvement=coverage_pct
-                )
-
+                try:
+                    coverage_pct = float(res.get("coverage_pct", 0))
+                    notes_parts = [f"post-save {token}"]
+                    if quality_result:
+                        notes_parts.append(f"score={quality_result.get('score', 0):.1f}")
+                    notes_parts.append(f"gaps={inserted_gaps}")
+                    notes_parts.append(f"sugs={len(sugerencias_generadas) if sugerencias_generadas else 0}")
+                    ai_post.registrar_training_history(
+                        model_id=mid, data_start=t_start, data_end=we,
+                        notes=" | ".join(notes_parts),
+                        coverage_improvement=coverage_pct)
+                except: pass
                 print(f"[HU1.4] Modelo guardado: {mid} (con feedback de gaps/quality/suggestions)")
                 cur.execute("RELEASE SAVEPOINT hu14")
-
             except Exception as e:
-                try:
-                    cur.execute("ROLLBACK TO SAVEPOINT hu14")
-                except Exception:
-                    pass
-
-                try:
-                    cur.execute("RELEASE SAVEPOINT hu14")
-                except Exception:
-                    pass
-
-                print(f"[HU1.4] Error REAL: {e}")
-                import traceback
-                traceback.print_exc()
+                try: cur.execute("ROLLBACK TO SAVEPOINT hu14")
+                except: pass
+                try: cur.execute("RELEASE SAVEPOINT hu14")
+                except: pass
+                print(f"[HU1.4] Error: {e}"); import traceback; traceback.print_exc()
 
             cleanup_null_workstation_schedules(cur, ws, we)
             c.commit()
