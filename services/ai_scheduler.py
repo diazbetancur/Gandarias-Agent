@@ -45,8 +45,17 @@ def _end_eff(t: time) -> time:
     return t if t != time(0, 0) else time(23, 59)
 
 
+def _end_min(t: time) -> int:
+    """
+    Para cálculos internos, 23:59 y 00:00 al final de día se tratan como 24:00.
+    """
+    if t == time(0, 0) or t == time(23, 59):
+        return 24 * 60
+    return _t2m(t)
+
+
 def _seg_min(start: time, end: time) -> int:
-    return max(0, _t2m(_end_eff(end)) - _t2m(start))
+    return max(0, _end_min(end) - _t2m(start))
 
 
 def _merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
@@ -404,6 +413,14 @@ class ValidadorReglasDuras:
         bloques = _merge_intervals(ivs)
         if len(bloques) > max_bloques:
             return False, "MAX_BLOQUES"
+
+        min_turno = self.reglas.get("min_duracion_turno_horas", 3) * 60
+        for bs, be in bloques:
+            if bs <= s_new and e_new <= be:
+                if (be - bs) < min_turno:
+                    return False, "BLOQUE_CORTO_PROVISIONAL"
+                break
+
         if len(bloques) >= 2:
             for i in range(len(bloques) - 1):
                 gap = bloques[i + 1][0] - bloques[i][1]
@@ -450,7 +467,7 @@ class ValidadorReglasDuras:
         if not self._weekly_hours_ok(emp, estado_emp, dur):
             return False, "MAX_HORAS_SEMANA"
 
-        return self._post_interval_checks(d, estado_emp, _t2m(dm.start), _t2m(_end_eff(dm.end)))
+        return self._post_interval_checks(d, estado_emp, _t2m(dm.start), _end_min(dm.end))
 
     def puede_asignar_hibrido(self, emp, grp, d, estado_emp: EstadoEmpleado, overrides=None):
         overrides = overrides or set()
@@ -479,7 +496,7 @@ class ValidadorReglasDuras:
         if not self._weekly_hours_ok(emp, estado_emp, dur):
             return False, "MAX_HORAS_SEMANA"
 
-        return self._post_interval_checks(d, estado_emp, _t2m(grp.start), _t2m(_end_eff(grp.end)))
+        return self._post_interval_checks(d, estado_emp, _t2m(grp.start), _end_min(grp.end))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -525,7 +542,7 @@ class ScorerCandidatos:
 
         ph = self.modelo.horarios_ws.get((ws_id, dow))
         if ph and ph.frecuencia > 0:
-            dist = (abs(_t2m(dm.start) - ph.inicio_tipico_min) + abs(_t2m(_end_eff(dm.end)) - ph.fin_tipico_min)) / 2.0
+            dist = (abs(_t2m(dm.start) - ph.inicio_tipico_min) + abs(_end_min(dm.end) - ph.fin_tipico_min)) / 2.0
             s_h = max(0.0, 1.0 - dist / 480.0)
         else:
             s_h = 0.5
@@ -690,7 +707,7 @@ class AIScheduleGenerator:
 
     def _asignar(self, emp, dm, sched, estados, cov, remaining):
         sched[dm.date].append((emp, dm))
-        s, e = _t2m(dm.start), _t2m(_end_eff(dm.end))
+        s, e = _t2m(dm.start), _end_min(dm.end)
         estados[str(emp.id)].registrar(dm.date, str(dm.wsid), s, e)
         remaining[dm.id] = max(0, remaining.get(dm.id, 0) - 1)
         cov[dm.id]["met"] += 1
@@ -699,22 +716,23 @@ class AIScheduleGenerator:
         cov[dm.id]["employees"].append(str(emp.id))
 
     def _asignar_hibrido(self, emp, grp, sched, estados, cov, remaining):
-        grp.dm_a.observation_override = grp.dm_a.observation_override or "HYB|BT"
-        grp.dm_b.observation_override = grp.dm_b.observation_override or "HYB|BT"
-        grp.dm_a.hybrid_partner_wsid = grp.wsid_b
-        grp.dm_b.hybrid_partner_wsid = grp.wsid_a
-        grp.dm_a.hybrid_group_id = grp.id
-        grp.dm_b.hybrid_group_id = grp.id
+        for dm in getattr(grp, "demands", []):
+            dm.observation_override = "HYB|BT"
+            if str(dm.wsid) == str(grp.wsid_a):
+                dm.hybrid_partner_wsid = grp.wsid_b
+            elif str(dm.wsid) == str(grp.wsid_b):
+                dm.hybrid_partner_wsid = grp.wsid_a
+            dm.hybrid_group_id = grp.id
+            sched[grp.date].append((emp, dm))
 
-        sched[grp.date].append((emp, grp.dm_a))
-        sched[grp.date].append((emp, grp.dm_b))
         estados[str(emp.id)].registrar(
             grp.date,
             f"HYB:{grp.wsid_a}|{grp.wsid_b}",
             _t2m(grp.start),
-            _t2m(_end_eff(grp.end)),
+            _end_min(grp.end),
         )
-        for dm in (grp.dm_a, grp.dm_b):
+
+        for dm in getattr(grp, "demands", []):
             remaining[dm.id] = max(0, remaining.get(dm.id, 0) - 1)
             cov[dm.id]["met"] += 1
             cov[dm.id]["covered"] += 1
@@ -724,7 +742,7 @@ class AIScheduleGenerator:
     def _fase_hibridos(self, emps, hybrid_groups, sched, estados, cov, remaining, overrides, prom_min):
         filled = 0
         for grp in sorted(hybrid_groups, key=lambda g: (g.date, _t2m(g.start), str(g.wsid_a), str(g.wsid_b))):
-            if remaining.get(grp.dm_a.id, 0) <= 0 and remaining.get(grp.dm_b.id, 0) <= 0:
+            if all(remaining.get(dm.id, 0) <= 0 for dm in getattr(grp, "demands", [])):
                 continue
             best = self._mejor_candidato_hibrido(emps, grp, estados, overrides, prom_min)
             if best:
@@ -761,7 +779,7 @@ class AIScheduleGenerator:
             for eid, pairs in by_emp.items():
                 ivs = []
                 for emp, dm in pairs:
-                    ivs.append((_t2m(dm.start), _t2m(_end_eff(dm.end))))
+                    ivs.append((_t2m(dm.start), _end_min(dm.end)))
                 bloques = _merge_intervals(ivs)
                 for blk_s, blk_e in bloques:
                     blk_dur = blk_e - blk_s
@@ -778,7 +796,7 @@ class AIScheduleGenerator:
             removed_intervals = defaultdict(set)
             for emp, dm in sched[d]:
                 eid = str(emp.id)
-                s, e = _t2m(dm.start), _t2m(_end_eff(dm.end))
+                s, e = _t2m(dm.start), _end_min(dm.end)
                 if eid in emps_to_remove and dm.wsid is not None:
                     if (s, e) not in removed_intervals[eid]:
                         estados[eid].desregistrar(d, str(dm.wsid), s, e)

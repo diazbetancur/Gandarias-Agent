@@ -160,6 +160,24 @@ class ValidadorReglasService:
         out.append((cs, ce))
         return out
 
+    @staticmethod
+    def _end_minutes(t):
+        if t.hour == 0 and t.minute == 0:
+            return 24 * 60
+        if t.hour == 23 and t.minute == 59:
+            return 24 * 60
+        return t.hour * 60 + t.minute
+
+    @staticmethod
+    def _es_solape_hibrido_valido(a, b) -> bool:
+        a_s, a_e, a_ws, a_wsid, a_obs = a
+        b_s, b_e, b_ws, b_wsid, b_obs = b
+        if a_s != b_s or a_e != b_e:
+            return False
+        if a_wsid == b_wsid:
+            return False
+        return str(a_obs or "").startswith("HYB|") and str(b_obs or "").startswith("HYB|")
+
     def validar(self, sched, emps=None):
         self._log("Iniciando validación de reglas...")
         violaciones: List[Violacion] = []
@@ -187,11 +205,11 @@ class ValidadorReglasService:
                     violaciones.append(Violacion(TipoViolacion.RANGO_INVALIDO, SeveridadViolacion.CRITICA, eid, emp_names[eid], d, "Turno con hora nula", 0, 1, getattr(dm, 'wsname', '')))
                     continue
                 si = st.hour * 60 + st.minute
-                ei = en.hour * 60 + en.minute
+                ei = self._end_minutes(en)
                 if ei <= si:
                     violaciones.append(Violacion(TipoViolacion.RANGO_INVALIDO, SeveridadViolacion.CRITICA, eid, emp_names[eid], d, "Hora fin <= hora inicio", 0, 1, getattr(dm, 'wsname', '')))
                     continue
-                emp_day[eid][d].append((si, ei, getattr(dm, 'wsname', '') or '', str(getattr(dm, 'wsid', ''))))
+                emp_day[eid][d].append((si, ei, getattr(dm, 'wsname', '') or '', str(getattr(dm, 'wsid', '')), getattr(dm, 'observation_override', '')))
 
                 eobj = emp_obj.get(eid)
                 if eobj and not eobj.can(getattr(dm, 'wsid', None)):
@@ -209,6 +227,25 @@ class ValidadorReglasService:
                     if not inside:
                         violaciones.append(Violacion(TipoViolacion.FUERA_USERSHIFT, SeveridadViolacion.ALTA, eid, emp_names[eid], d, f"Inicio fuera de UserShift en {getattr(dm, 'wsname', '')}", si / 60.0, 0, getattr(dm, 'wsname', '')))
 
+        for d, pairs in (sched or {}).items():
+            by_emp_abs = defaultdict(lambda: {"abs": False, "work": False, "name": ""})
+            for emp, dm in pairs:
+                eid = str(emp.id)
+                by_emp_abs[eid]["name"] = getattr(emp, "name", eid)
+                if dm is None:
+                    continue
+                if getattr(dm, "wsid", None) is None and getattr(emp, "abs_reason", {}).get(d) in {"ABS", "VAC"}:
+                    by_emp_abs[eid]["abs"] = True
+                elif getattr(dm, "wsid", None) is not None:
+                    by_emp_abs[eid]["work"] = True
+            for eid, info in by_emp_abs.items():
+                if info["abs"] and info["work"]:
+                    violaciones.append(Violacion(
+                        TipoViolacion.RANGO_INVALIDO, SeveridadViolacion.CRITICA,
+                        eid, info["name"], d,
+                        "Asignado durante ausencia/vacación", 1, 0
+                    ))
+
         min_min = REGLAS["min_duracion_bloque_horas"] * 60
         for eid, days in emp_day.items():
             weekly_total = 0
@@ -220,11 +257,13 @@ class ValidadorReglasService:
                         violaciones.append(Violacion(TipoViolacion.TURNO_CORTO, SeveridadViolacion.CRITICA, eid, emp_names[eid], d, f"Bloque {bs//60:02d}:{bs%60:02d}-{be//60:02d}:{be%60:02d} < 3h", (be - bs) / 60.0, REGLAS["min_duracion_bloque_horas"], bloque_inicio=f"{bs//60:02d}:{bs%60:02d}", bloque_fin=f"{be//60:02d}:{be%60:02d}"))
 
                 # solapamientos reales por filas
-                ivs_sorted = sorted(ivs, key=lambda x: (x[0], x[1]))
+                ivs_sorted = sorted(ivs, key=lambda x: (x[0], x[1], x[2]))
                 for i in range(len(ivs_sorted) - 1):
-                    a_s, a_e, a_ws, _ = ivs_sorted[i]
-                    b_s, b_e, b_ws, _ = ivs_sorted[i + 1]
-                    if a_e > b_s:
+                    a = ivs_sorted[i]
+                    b = ivs_sorted[i + 1]
+                    a_s, a_e, a_ws, _, _ = a
+                    b_s, b_e, b_ws, _, _ = b
+                    if a_e > b_s and not self._es_solape_hibrido_valido(a, b):
                         violaciones.append(Violacion(TipoViolacion.SOLAPAMIENTO, SeveridadViolacion.CRITICA, eid, emp_names[eid], d, f"Solapamiento entre {a_ws} y {b_ws}", 1, 0, workstation=f"{a_ws} / {b_ws}"))
 
             off = 7 - len(days)

@@ -149,20 +149,24 @@ class Demand:
 
 
 class HybridDemandGroup:
-    def __init__(self, dm_a: Demand, dm_b: Demand, description: str = ""):
-        self.id = f"HYB::{dm_a.id}::{dm_b.id}"
-        self.date = dm_a.date
-        self.start = dm_a.start
-        self.end = dm_a.end
-        self.wsid_a = dm_a.wsid
-        self.wsid_b = dm_b.wsid
-        self.wsname_a = dm_a.wsname
-        self.wsname_b = dm_b.wsname
-        self.dm_a = dm_a
-        self.dm_b = dm_b
-        self.demands = [dm_a, dm_b]
-        self.description = description or f"{dm_a.wsname} + {dm_b.wsname}"
-        self.duration_min = _seg_min(dm_a.start, dm_a.end)
+    def __init__(self, demands_a: List[Demand], demands_b: List[Demand], description: str = ""):
+        if not demands_a or not demands_b:
+            raise ValueError("HybridDemandGroup requiere demandas en ambos lados")
+        self.atoms_a = list(demands_a)
+        self.atoms_b = list(demands_b)
+        self.demands = self.atoms_a + self.atoms_b
+        self.dm_a = self.atoms_a[0]
+        self.dm_b = self.atoms_b[0]
+        self.id = f"HYB::{self.dm_a.id}::{self.dm_b.id}"
+        self.date = self.dm_a.date
+        self.start = min((dm.start for dm in self.demands), key=_t2m)
+        self.end = max((dm.end for dm in self.demands), key=lambda t: _t2m(_end_eff(t)))
+        self.wsid_a = self.dm_a.wsid
+        self.wsid_b = self.dm_b.wsid
+        self.wsname_a = self.dm_a.wsname
+        self.wsname_b = self.dm_b.wsname
+        self.description = description or f"{self.wsname_a} + {self.wsname_b}"
+        self.duration_min = sum(_seg_min(dm.start, dm.end) for dm in self.atoms_a)
 
     def pair_key(self):
         return frozenset({str(self.wsid_a), str(self.wsid_b)})
@@ -402,42 +406,68 @@ def fetch_hybrid_pairs(cur):
 
 
 def build_hybrid_groups(demands, hybrid_pairs):
-    buckets = defaultdict(list)
+    """
+    Construye híbridos a partir de demandas 0.5 manteniendo la granularidad original.
+    Empareja intervalos exactos por pareja válida de workstations y luego fusiona
+    átomos consecutivos para obtener bloques útiles para el motor.
+    """
+    if not hybrid_pairs:
+        return []
+
+    by_date_ws_iv = defaultdict(list)
     for dm in demands:
-        if getattr(dm, "is_hybrid_05", False):
-            buckets[(dm.date, _t2m(dm.start), _t2m(_end_eff(dm.end)))].append(dm)
+        if not getattr(dm, "is_hybrid_05", False):
+            continue
+        s = _t2m(dm.start)
+        e = _t2m(_end_eff(dm.end))
+        by_date_ws_iv[(dm.date, str(dm.wsid), s, e)].append(dm)
+
+    by_date_pair_atoms = defaultdict(list)
+    dates = sorted({dm.date for dm in demands if getattr(dm, "is_hybrid_05", False)})
+
+    for day in dates:
+        ws_present = sorted({str(dm.wsid) for dm in demands if getattr(dm, "is_hybrid_05", False) and dm.date == day})
+        for i, ws_a in enumerate(ws_present):
+            for ws_b in ws_present[i + 1:]:
+                pair_key = frozenset({ws_a, ws_b})
+                meta = hybrid_pairs.get(pair_key)
+                if not meta:
+                    continue
+                ivs_a = {(s, e) for (_d, _ws, s, e) in by_date_ws_iv.keys() if _d == day and _ws == ws_a}
+                ivs_b = {(s, e) for (_d, _ws, s, e) in by_date_ws_iv.keys() if _d == day and _ws == ws_b}
+                for s, e in sorted(ivs_a & ivs_b):
+                    list_a = by_date_ws_iv.get((day, ws_a, s, e), [])
+                    list_b = by_date_ws_iv.get((day, ws_b, s, e), [])
+                    n = min(len(list_a), len(list_b))
+                    for idx in range(n):
+                        by_date_pair_atoms[(day, pair_key, meta.get("description") or "HYB")].append(
+                            (s, e, list_a[idx], list_b[idx])
+                        )
 
     groups = []
-    used_ids = set()
-    for (_day, _s, _e), items in buckets.items():
-        items = [x for x in items if x.id not in used_ids]
-        if len(items) < 2:
-            continue
-        items.sort(key=lambda d: (str(d.wsid), str(d.id)))
-        for i, dm_a in enumerate(items):
-            if dm_a.id in used_ids:
+    for (_day, pair_key, desc), atoms in by_date_pair_atoms.items():
+        atoms.sort(key=lambda x: (x[0], x[1], str(x[2].id), str(x[3].id)))
+        run_a, run_b = [], []
+        run_end = None
+
+        for s, e, dm_a, dm_b in atoms:
+            if run_end is None:
+                run_end = e
+                run_a, run_b = [dm_a], [dm_b]
                 continue
-            match = None
-            desc = "HYB"
-            for j in range(i + 1, len(items)):
-                dm_b = items[j]
-                if dm_b.id in used_ids or str(dm_a.wsid) == str(dm_b.wsid):
-                    continue
-                key = frozenset({str(dm_a.wsid), str(dm_b.wsid)})
-                if key in hybrid_pairs:
-                    match = dm_b
-                    desc = hybrid_pairs[key].get("description") or "HYB"
-                    break
-            if match is None:
-                continue
-            group = HybridDemandGroup(dm_a, match, desc)
-            dm_a.hybrid_group_id = group.id
-            match.hybrid_group_id = group.id
-            dm_a.hybrid_partner_wsid = match.wsid
-            match.hybrid_partner_wsid = dm_a.wsid
-            groups.append(group)
-            used_ids.add(dm_a.id)
-            used_ids.add(match.id)
+
+            if s == run_end:
+                run_end = e
+                run_a.append(dm_a)
+                run_b.append(dm_b)
+            else:
+                groups.append(HybridDemandGroup(run_a, run_b, desc))
+                run_end = e
+                run_a, run_b = [dm_a], [dm_b]
+
+        if run_a and run_b:
+            groups.append(HybridDemandGroup(run_a, run_b, desc))
+
     return groups
 
 
@@ -553,7 +583,7 @@ def load_data(week_start: date):
         print(f"[DATA] Template: {tpl_name} ({tpl_id})")
 
         # Demands
-        demands = [
+        raw_demands = [
             Demand(r) for r in fetchall(cur, '''
                 SELECT d."Id", %s + d."Day"*interval '1 day',
                        d."WorkstationId", w."Name",
@@ -566,9 +596,17 @@ def load_data(week_start: date):
                 ORDER BY d."Day", d."StartTime", d."EndTime", d."Id"
             ''', (week_start, tpl_id))
         ]
-        demands = coalesce_demands(demands, tolerate_gap_min=0)
-        demands = normalize_by_max_need_profile(demands)
         hybrid_pairs, hybrid_partner_map = fetch_hybrid_pairs(cur)
+
+        # Las demandas híbridas (EffortRequired=0.5) se conservan sin coalescer
+        # para no perder la granularidad que permite construir parejas simultáneas.
+        hybrid_demands = [d for d in raw_demands if getattr(d, "is_hybrid_05", False)]
+        normal_demands = [d for d in raw_demands if not getattr(d, "is_hybrid_05", False)]
+
+        normal_demands = coalesce_demands(normal_demands, tolerate_gap_min=0)
+        normal_demands = normalize_by_max_need_profile(normal_demands)
+
+        demands = normal_demands + hybrid_demands
         print(f"[DATA] {len(demands)} demands | hybrid_pairs={len(hybrid_pairs)}")
 
         # ── EMPLEADOS (CORREGIDO: ComplementHours, no IsSplitShift) ──
@@ -1033,7 +1071,7 @@ def generate_ai(week_start: date):
             "days_off_violations": days_off_diag,
             "coverage": round((total_cov / total_req) * 100, 1) if total_req else 100,
             "flexible_mode": True,
-            "solver": "ai_pattern_v5_hybrid_native",
+            "solver": "ai_pattern_v6_hybrid_fixed",
         },
         "coverage_details": {
             d_id: {
@@ -1060,15 +1098,15 @@ def generate_ai(week_start: date):
             cur_end_min = _t2m(_end_eff(dm.end))
 
             if getattr(dm, "observation_override", None):
-                obs = dm.observation_override
+                base_obs = dm.observation_override or "HYB|BT"
+                if base_obs.startswith("HYB|"):
+                    obs = "HYB|C" if dm.end == time(23, 59) else "HYB|BT"
+                else:
+                    obs = base_obs
             elif dm.wsid is None:
                 obs = emp.abs_reason.get(d, "ABS")
-            elif ws_latest is not None and cur_end_min == ws_latest:
-                obs = "C"
-            elif last_day is not None and cur_end_min == last_day:
-                obs = ""
             else:
-                obs = "BT"
+                obs = "C" if dm.end == time(23, 59) else "BT"
 
             res["schedule"][k].append({
                 "employee_id": str(emp.id),
@@ -1105,7 +1143,7 @@ def cleanup_null_workstation_schedules(cur, ws, we):
 
 @app.route('/api/health')
 def health():
-    st = {"status": "checking", "timestamp": now().isoformat(), "version": "4.2-ai-feedback", "checks": {}}
+    st = {"status": "checking", "timestamp": now().isoformat(), "version": "6.0-hybrid-fixed", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -1192,7 +1230,7 @@ def save():
                     agenda_result=res,
                     ctx=ctx,
                     token=token,
-                    is_post_ai=False,
+                    is_post_ai=True,
                 )
                 inserted_gaps = len(explicaciones)
                 print(f"[HU1.1] {inserted_gaps} gaps guardados en BD")
@@ -1217,7 +1255,7 @@ def save():
                         for cs in coverage_stats.values()]},
                     sched=sched, emps=emps,
                     coverage_stats=coverage_stats,
-                    is_post_ai=False,
+                    is_post_ai=True,
                 )
                 inserted_quality = quality_result.get("inserted", 0)
                 print(f"[HU1.2] Score={quality_result.get('score', 0):.2f}, {inserted_quality} registros en BD")
@@ -1244,7 +1282,7 @@ def save():
                     token=token,
                     week_start=ws,
                     week_end=we,
-                    is_post_ai=False,
+                    is_post_ai=True,
                 )
                 print(f"[HU1.3] {len(sugerencias_generadas)} sugerencias guardadas en BD")
                 cur.execute("RELEASE SAVEPOINT hu13")
@@ -1262,7 +1300,7 @@ def save():
                 val_svc = ValidadorReglasService(cursor=cur, debug=True)
                 val_result = val_svc.validar_y_guardar(
                     sched=sched, token=token, week_start=ws, week_end=we,
-                    emps=emps, is_post_ai=False)
+                    emps=emps, is_post_ai=True)
                 print(f"[HU1.6] {val_result.total_violaciones} violaciones")
                 res["summary"]["hu16_violations"] = val_result.total_violaciones
                 res["summary"]["hu16_schedule_valid"] = val_result.schedule_valido
@@ -1293,30 +1331,29 @@ def save():
                               emp.abs_reason.get(d, 'ABS'), False, now(), token))
 
                 coalesced = coalesce_employee_day_workstation(ass)
-                total_min_by_eid = defaultdict(int)
-                for (eid, wsid), rows in coalesced.items():
-                    if wsid is None: continue
-                    for emp, s, e, _ in rows: total_min_by_eid[eid] += max(0, e - s)
 
                 for (eid, wsid), rows in coalesced.items():
-                    if wsid is None: continue
-                    if total_min_by_eid.get(eid, 0) < MIN_BLOCK_SAVE_MIN:
-                        if ASCII_LOGS:
-                            nm = rows[0][0].name if rows else eid
-                            print(f"[SAVE-MIN] {d} omitido {nm}: {total_min_by_eid.get(eid,0)/60:.1f}h<{MIN_SHIFT_DURATION_HOURS}h")
+                    if wsid is None:
                         continue
                     for emp, s_min, e_min, src_dms in rows:
-                        if e_min <= s_min: continue
+                        if e_min <= s_min:
+                            continue
+                        dur_min = max(0, e_min - s_min)
+                        if dur_min < MIN_BLOCK_SAVE_MIN:
+                            if ASCII_LOGS:
+                                nm = rows[0][0].name if rows else eid
+                                print(f"[SAVE-MIN] {d} omitido {nm}: {dur_min/60:.1f}h<{MIN_SHIFT_DURATION_HOURS}h")
+                            continue
+
                         s_t = _m2t(s_min)
                         e_t = _m2t(e_min if e_min < 1440 else 0)
-                        day_key = d.isoformat()
-                        ws_latest = (latest_end_by_wsid.get(day_key, {}) or {}).get(str(wsid))
-                        last_day = latest_end_by_day.get(day_key)
-                        if any(getattr(src_dm, "observation_override", None) for src_dm in src_dms):
-                            obs = next((getattr(src_dm, "observation_override", None) for src_dm in src_dms if getattr(src_dm, "observation_override", None)), "HYB|BT")
-                        elif ws_latest is not None and e_min == ws_latest: obs = "C"
-                        elif last_day is not None and e_min == last_day: obs = ""
-                        else: obs = "BT"
+                        is_hyb = any((getattr(src_dm, "observation_override", "") or "").startswith("HYB|") for src_dm in src_dms)
+
+                        if is_hyb:
+                            obs = "HYB|C" if e_t == time(23, 59) else "HYB|BT"
+                        else:
+                            obs = "C" if e_t == time(23, 59) else "BT"
+
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
@@ -1373,11 +1410,11 @@ def save():
     out["summary"]["hu13_suggestions_generated"] = len(sugerencias_generadas) if sugerencias_generadas else 0
     out["summary"]["hu14_ai_adjustments"] = len(ajustes_ia) if ajustes_ia else 0
 
-    return jsonify({"message": "Horario guardado (IA v4.2)", **out}), 201
+    return jsonify({"message": "Horario guardado (IA v6 corregida)", **out}), 201
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 if __name__ == "__main__":
-    print("API Gandarias v4.2 (IA + feedback loop) en http://localhost:5000")
+    print("API Gandarias v6 corregida (IA + híbridos reales) en http://localhost:5000")
     print(f"CSV entrenamiento: {CSV_ENTRENAMIENTO}")
     app.run(host="0.0.0.0", port=5000, debug=False)
