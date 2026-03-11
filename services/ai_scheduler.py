@@ -465,7 +465,7 @@ class ValidadorReglasDuras:
         if estado_emp.minutos_por_dia.get(d, 0) + dur > max_h:
             return False, "MAX_HORAS_DIA"
         if not self._weekly_hours_ok(emp, estado_emp, dur):
-            return False, "MAX_HORAS_SEMANA"
+            return False, "MAX_HORAS_SEMANALES"
 
         return self._post_interval_checks(d, estado_emp, _t2m(dm.start), _end_min(dm.end))
 
@@ -494,7 +494,7 @@ class ValidadorReglasDuras:
         if estado_emp.minutos_por_dia.get(d, 0) + dur > max_h:
             return False, "MAX_HORAS_DIA"
         if not self._weekly_hours_ok(emp, estado_emp, dur):
-            return False, "MAX_HORAS_SEMANA"
+            return False, "MAX_HORAS_SEMANALES"
 
         return self._post_interval_checks(d, estado_emp, _t2m(grp.start), _end_min(grp.end))
 
@@ -507,6 +507,20 @@ class ValidadorReglasDuras:
 class ScorerCandidatos:
     def __init__(self, modelo: ModeloPatrones):
         self.modelo = modelo or ModeloPatrones()
+
+    def _weekly_deficit_score(self, emp, estado) -> float:
+        limit_fn = getattr(emp, "weekly_hours_limit", None)
+        if not callable(limit_fn):
+            return 0.0
+        try:
+            hired_min = int(limit_fn() or 0)
+        except Exception:
+            hired_min = 0
+        if hired_min <= 0:
+            return 0.0
+        assigned_min = int(getattr(estado, "minutos_semana", 0) or 0)
+        deficit = max(0, hired_min - assigned_min)
+        return max(0.0, min(1.0, deficit / hired_min))
 
     def _quality_factor(self, ws_id: str) -> float:
         qmap = self.modelo.obs_global.get("quality_ws_avg", {}) or {}
@@ -561,11 +575,20 @@ class ScorerCandidatos:
         mismo_ws = any(ws == ws_id for dd, ws, _, _ in estado.asignaciones if dd == d)
         s_cont = 1.0 if mismo_ws else (0.6 if tiene_hoy else 0.3)
 
+        s_def = self._weekly_deficit_score(emp, estado)
         bonus_q = self._quality_factor(ws_id)
         penalty_s = self._suggestion_penalty(ws_id)
         penalty_v = self._violation_penalty(ws_id)
 
-        score = 0.33 * s_af + 0.20 * s_h + 0.22 * s_carga + 0.10 * s_dia + 0.10 * s_cont + bonus_q - penalty_s - penalty_v
+        score = (
+            0.24 * s_af +
+            0.16 * s_h +
+            0.12 * s_carga +
+            0.08 * s_dia +
+            0.08 * s_cont +
+            0.32 * s_def +
+            bonus_q - penalty_s - penalty_v
+        )
         return round(max(0.0, min(1.5, score)), 4)
 
     def score_hybrid(self, emp, grp, d, estado, n_emps, prom_min_sem):
@@ -574,7 +597,8 @@ class ScorerCandidatos:
         s1 = self.score(emp, dm_a, d, estado, n_emps, prom_min_sem)
         s2 = self.score(emp, dm_b, d, estado, n_emps, prom_min_sem)
         bonus_h = self._hybrid_bonus(str(grp.wsid_a), str(grp.wsid_b))
-        return round(min(s1, s2) * 0.70 + ((s1 + s2) / 2.0) * 0.20 + bonus_h + 0.10, 4)
+        s_def = self._weekly_deficit_score(emp, estado)
+        return round(min(s1, s2) * 0.62 + ((s1 + s2) / 2.0) * 0.18 + bonus_h + 0.08 + (0.12 * s_def), 4)
 
 
 # ═══════════════════════════════════════════════════════════════════

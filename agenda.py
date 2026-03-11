@@ -108,10 +108,30 @@ class Emp:
         return d in self.absent
 
     def weekly_hours_limit(self):
+        """
+        Límite semanal duro (MINUTOS):
+        - ComplementHours=True  -> cap = MAX_HOURS_PER_WEEK (ley), aunque HiredHours sea menor
+        - ComplementHours=False -> cap = min(HiredHours, MAX_HOURS_PER_WEEK)
+        Nunca se excede el máximo semanal.
+        """
         hired = int(self.hired_hours or 0)
-        if hired <= 0 or bool(self.extra_hours) or bool(self.complement_hours):
-            return None
-        return hired * 60
+        if hired <= 0:
+            self.max_week_hours = 0
+            return 0
+
+        law_cap = int(MAX_HOURS_PER_WEEK or 0)
+        if law_cap <= 0:
+            law_cap = hired  # fallback defensivo
+
+        if bool(self.complement_hours):
+            cap_h = law_cap
+        else:
+            cap_h = min(hired, law_cap)
+
+        # atributo usado por HU 1.1 (explicador_huecos) si existe
+        self.max_week_hours = int(cap_h)
+
+        return int(cap_h * 60)
 
     def available(self, d: date, s: time, e: time) -> bool:
         if self.off(d) or self.absent_day(d):
@@ -254,6 +274,7 @@ LAW_IDS = {
     "min_shift_duration_hours": "df056d24-7d3a-416a-949f-3f0b491515e4",
     "min_hours_between_shifts": "be491f3f-059b-42ed-adc4-331754d85412",
     "min_days_off_per_week":    "756d9660-5101-4673-892b-267b38dc805e",
+    "max_hours_per_week":       "05ab8c40-f06c-47d9-b9ed-4462ab64f3f2",
 }
 
 def fetch_law_restrictions_by_id(ids=None):
@@ -564,6 +585,7 @@ def load_data(week_start: date):
         # Laws
         global MIN_HOURS_BETWEEN_SPLIT, MIN_HOURS_BETWEEN_SHIFTS
         global MAX_HOURS_PER_DAY, MIN_SHIFT_DURATION_HOURS
+        global MAX_HOURS_PER_WEEK, MAX_DAYS_PER_WEEK
 
         laws = fetch_law_restrictions_by_id()
         L = laws["resolved"] if laws else {}
@@ -572,6 +594,8 @@ def load_data(week_start: date):
         MIN_SHIFT_DURATION_HOURS = int(L.get("min_shift_duration_hours") or 3)
         MIN_HOURS_BETWEEN_SHIFTS = int(L.get("min_hours_between_shifts") or 9)
         MIN_DAYS_OFF = int(L.get("min_days_off_per_week") or 2)
+        # ✅ NUEVO: Máximo horas semanales por ley
+        MAX_HOURS_PER_WEEK = int(L.get("max_hours_per_week") or 38)
 
         if ASCII_LOGS:
             print(f"[LAW] MAX_H={MAX_HOURS_PER_DAY}h MIN_SHIFT={MIN_SHIFT_DURATION_HOURS}h "
