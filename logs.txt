@@ -1,4 +1,4 @@
-﻿API Gandarias v6 corregida (IA + h├¡bridos reales) en http://localhost:5000
+﻿API Gandarias v5.0 (IA iterativa + h├¡bridos generalizados) en http://localhost:5000
 CSV entrenamiento: C:\Users\yutu6\OneDrive\Desktop\Gandarias-Agent\_Schedules__202601300806.csv
  * Serving Flask app 'agenda'
  * Debug mode: off

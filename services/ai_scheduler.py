@@ -534,11 +534,11 @@ class ScorerCandidatos:
 
     def _suggestion_penalty(self, ws_id: str) -> float:
         prob = (self.modelo.obs_global.get("ws_problematicas_sugerencias", {}) or {}).get(ws_id, 0)
-        return min(0.15, float(prob) * 0.01)
+        return min(0.08, float(prob) * 0.005)
 
     def _violation_penalty(self, ws_id: str) -> float:
         prob = (self.modelo.obs_global.get("ws_violation_penalty", {}) or {}).get(ws_id, 0)
-        return min(0.20, float(prob) * 0.02)
+        return min(0.10, float(prob) * 0.008)
 
     def _hybrid_bonus(self, ws_a: str, ws_b: str) -> float:
         pair_key = "|".join(sorted([ws_a, ws_b]))
@@ -663,7 +663,7 @@ class AIScheduleGenerator:
             n_cand = sum(1 for e in emps if e.can(dm.wsid) and not e.off(dm.date) and not e.absent_day(dm.date))
             is_night = _t2m(dm.start) >= 20 * 60
             is_wknd = dm.date.weekday() >= 5
-            prio = n_cand * 10 - (50 if is_night else 0) - (30 if is_wknd else 0) - (20 if getattr(dm, "is_hybrid_05", False) else 0)
+            prio = n_cand * 10 - (50 if is_night else 0) - (30 if is_wknd else 0) - (20 if getattr(dm, "has_hybrid_component", False) else 0)
             demand_pri.append((prio, dm))
         demand_pri.sort(key=lambda x: (x[0], x[1].date, _t2m(x[1].start)))
 
@@ -689,11 +689,53 @@ class AIScheduleGenerator:
         self._pase_extra(emps, demands, sched, estados, coverage_stats, remaining, overrides, prom_min * 2.0, "POST-FILTER")
         self._fase_hibridos(emps, hybrid_groups, sched, estados, coverage_stats, remaining, overrides, prom_min)
 
+        # ── LOOP DE COBERTURA: intentar llegar al piso objetivo ──
         coverage = self._coverage_pct_from_cov(coverage_stats)
-        if coverage < min_coverage_pct:
-            self._log(f"[FLOOR] cobertura {coverage}% < {min_coverage_pct}% → pase adicional")
-            self._pase_extra(emps, demands, sched, estados, coverage_stats, remaining, overrides, prom_min * 3.2, "FLOOR")
+        floor_passes = 0
+        multipliers = [3.0, 4.0, 5.0, 8.0]
+        while coverage < min_coverage_pct and floor_passes < len(multipliers):
+            mult = multipliers[floor_passes]
+            self._log(f"[FLOOR-{floor_passes+1}] cobertura {coverage}% < {min_coverage_pct}% → pase con mult={mult}")
+            filled = self._pase_extra(emps, demands, sched, estados, coverage_stats, remaining, overrides, prom_min * mult, f"FLOOR-{floor_passes+1}")
             self._fase_hibridos(emps, hybrid_groups, sched, estados, coverage_stats, remaining, overrides, prom_min)
+            new_cov = self._coverage_pct_from_cov(coverage_stats)
+            if new_cov <= coverage and filled == 0:
+                self._log(f"[FLOOR] Sin progreso en pass {floor_passes+1}, abort loop")
+                break
+            coverage = new_cov
+            floor_passes += 1
+
+        # ── DIAGNÓSTICO DE RECHAZOS para demands no cubiertas ──
+        if coverage < min_coverage_pct:
+            reject_reasons = Counter()
+            unmet_demands = [dm for dm in demands if dm.wsid and remaining.get(dm.id, 0) > 0]
+            sample = unmet_demands[:50]
+            for dm in sample:
+                for e in emps:
+                    ok, reason = self.validador.puede_asignar(e, dm, dm.date, estados[str(e.id)], overrides)
+                    if not ok:
+                        reject_reasons[reason] += 1
+            self._log(f"[DIAG] Rechazos en {len(sample)} demands unmet (top razones):")
+            for reason, cnt in reject_reasons.most_common(10):
+                self._log(f"  {reason}: {cnt}")
+
+        # ── ÚLTIMO RECURSO: pase agresivo relajando múltiples reglas ──
+        if coverage < min_coverage_pct:
+            self._log(f"[LAST-RESORT] cobertura {coverage}% < {min_coverage_pct}% → relajando reglas")
+            orig_reglas = dict(self.reglas)
+            orig_val_reglas = dict(self.validador.reglas)
+            try:
+                # Relajar: +2 días trabajo, +2h/día
+                self.validador.reglas["max_dias_trabajo_semana"] = orig_reglas.get("max_dias_trabajo_semana", 5) + 2
+                self.validador.reglas["max_horas_por_dia"] = orig_reglas.get("max_horas_por_dia", 9) + 2
+                self.reglas["max_dias_trabajo_semana"] = self.validador.reglas["max_dias_trabajo_semana"]
+                self.reglas["max_horas_por_dia"] = self.validador.reglas["max_horas_por_dia"]
+                filled = self._pase_extra(emps, demands, sched, estados, coverage_stats, remaining, overrides, prom_min * 20.0, "LAST-RESORT")
+                self._fase_hibridos(emps, hybrid_groups, sched, estados, coverage_stats, remaining, overrides, prom_min)
+            finally:
+                self.validador.reglas = orig_val_reglas
+                self.reglas = orig_reglas
+            coverage = self._coverage_pct_from_cov(coverage_stats)
 
         for cs in coverage_stats.values():
             n = cs["demand"].need
@@ -776,11 +818,15 @@ class AIScheduleGenerator:
 
     def _pase_extra(self, emps, demands, sched, estados, cov, remaining, overrides, prom, label):
         filled = 0
+        is_floor = "FLOOR" in label or "LAST" in label
         for dm in sorted(demands, key=lambda d: (d.date, _t2m(d.start), str(d.wsid))):
             if dm.wsid is None or remaining.get(dm.id, 0) <= 0:
                 continue
             for _ in range(remaining[dm.id]):
                 best = self._mejor_candidato(emps, dm, estados, overrides, prom)
+                if not best and is_floor:
+                    # En pases FLOOR, intentar relajando +1 día de trabajo
+                    best = self._mejor_candidato_relajado(emps, dm, estados, overrides, prom)
                 if best:
                     self._asignar(best, dm, sched, estados, cov, remaining)
                     filled += 1
@@ -789,6 +835,27 @@ class AIScheduleGenerator:
         if filled:
             self._log(f"[{label}] +{filled} slots")
         return filled
+
+    def _mejor_candidato_relajado(self, emps, dm, estados, overrides, prom_min):
+        """
+        Versión relajada que permite +1 día extra de trabajo (regla blanda)
+        para cubrir cobertura cuando no hay candidatos normales.
+        """
+        best_emp, best_sc = None, -1.0
+        # Temporalmente relajar max_dias
+        orig_max = self.reglas.get("max_dias_trabajo_semana", 5)
+        self.validador.reglas["max_dias_trabajo_semana"] = orig_max + 1
+        try:
+            for e in emps:
+                ok, _ = self.validador.puede_asignar(e, dm, dm.date, estados[str(e.id)], overrides)
+                if not ok:
+                    continue
+                sc = self.scorer.score(e, dm, dm.date, estados[str(e.id)], len(emps), prom_min)
+                if sc > best_sc:
+                    best_sc, best_emp = sc, e
+        finally:
+            self.validador.reglas["max_dias_trabajo_semana"] = orig_max
+        return best_emp
 
     def _filtrar_bloques_cortos(self, sched, estados, cov, remaining):
         min_blk_min = self.reglas.get("min_duracion_turno_horas", 3) * 60

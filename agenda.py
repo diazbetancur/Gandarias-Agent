@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AGENDA GENERATOR API – Gandarías v4.2 (IA + reglas + feedback loop)
+AGENDA GENERATOR API – Gandarías v5.0 (IA iterativa + híbridos generalizados)
 ==================================================================
-CORRECCIONES v4.1:
-  - Query empleados: ComplementHours (no IsSplitShift), IsActive AND NOT IsDelete
-  - UserShift enforcement: plan_usershift_day_modes() → overrides para AI generator
-  - Hybrid 0.5 postprocess: apply_hybrid_05_postprocess() portado del viejo
-  - Min 3h validado POR BLOQUE individual (no total/día)
-  - Gap split 3h entre bloques del mismo día validado
+MEJORAS v5.0:
+  - Aprendizaje iterativo: carga modelo activo de BD antes de generar,
+    cada tirada aprende de las anteriores acumulando patrones.
+  - Híbridos generalizados: soporta 0.5, 1.5, 2.5, etc.
+    Ej: demanda 1.5 = 1 persona normal + 1 persona híbrida.
+  - Post-save training incremental: merge modelo previo + datos nuevos.
 """
 import logging
 import os
@@ -155,8 +155,21 @@ class Demand:
             self.raw_need = float(need) if need is not None else 0.0
         except (TypeError, ValueError):
             self.raw_need = 0.0
-        self.is_hybrid_05 = abs(self.raw_need - 0.5) < 1e-6
-        self.need = 1 if self.is_hybrid_05 else (int(round(self.raw_need)) if self.raw_need > 0 else 0)
+
+        # ── HYBRID GENERALIZADO ──
+        # Cualquier fracción .5 indica componente híbrido:
+        #   0.5 → need=1 (solo híbrido)
+        #   1.5 → need=2 (1 normal + 1 híbrido)
+        #   2.5 → need=3 (2 normales + 1 híbrido)
+        self.hybrid_fraction = self.raw_need - int(self.raw_need)  # parte decimal
+        self.has_hybrid_component = abs(self.hybrid_fraction - 0.5) < 1e-6
+        self.is_hybrid_05 = self.has_hybrid_component  # compat viejo
+        self.normal_need = int(self.raw_need)  # parte entera = personas normales
+        # need total: enteros + 1 persona si hay fracción .5
+        self.need = self.normal_need + (1 if self.has_hybrid_component else 0)
+        if self.need <= 0 and self.raw_need > 0:
+            self.need = 1
+
         self.slot_index = 0
         self.shift_type = None
         self.observation_override = None
@@ -165,7 +178,8 @@ class Demand:
 
     def __repr__(self):
         return (f"Demand(id={self.id}, date={self.date}, ws={self.wsname}, "
-                f"{self.start}-{self.end}, need={self.need}, hyb={self.is_hybrid_05})")
+                f"{self.start}-{self.end}, raw={self.raw_need}, need={self.need}, "
+                f"hyb_comp={self.has_hybrid_component})")
 
 
 class HybridDemandGroup:
@@ -428,7 +442,8 @@ def fetch_hybrid_pairs(cur):
 
 def build_hybrid_groups(demands, hybrid_pairs):
     """
-    Construye híbridos a partir de demandas 0.5 manteniendo la granularidad original.
+    Construye híbridos a partir de demandas con componente fraccionario (.5).
+    Soporta 0.5, 1.5, 2.5, etc.
     Empareja intervalos exactos por pareja válida de workstations y luego fusiona
     átomos consecutivos para obtener bloques útiles para el motor.
     """
@@ -437,17 +452,17 @@ def build_hybrid_groups(demands, hybrid_pairs):
 
     by_date_ws_iv = defaultdict(list)
     for dm in demands:
-        if not getattr(dm, "is_hybrid_05", False):
+        if not getattr(dm, "has_hybrid_component", False):
             continue
         s = _t2m(dm.start)
         e = _t2m(_end_eff(dm.end))
         by_date_ws_iv[(dm.date, str(dm.wsid), s, e)].append(dm)
 
     by_date_pair_atoms = defaultdict(list)
-    dates = sorted({dm.date for dm in demands if getattr(dm, "is_hybrid_05", False)})
+    dates = sorted({dm.date for dm in demands if getattr(dm, "has_hybrid_component", False)})
 
     for day in dates:
-        ws_present = sorted({str(dm.wsid) for dm in demands if getattr(dm, "is_hybrid_05", False) and dm.date == day})
+        ws_present = sorted({str(dm.wsid) for dm in demands if getattr(dm, "has_hybrid_component", False) and dm.date == day})
         for i, ws_a in enumerate(ws_present):
             for ws_b in ws_present[i + 1:]:
                 pair_key = frozenset({ws_a, ws_b})
@@ -622,16 +637,34 @@ def load_data(week_start: date):
         ]
         hybrid_pairs, hybrid_partner_map = fetch_hybrid_pairs(cur)
 
-        # Las demandas híbridas (EffortRequired=0.5) se conservan sin coalescer
-        # para no perder la granularidad que permite construir parejas simultáneas.
-        hybrid_demands = [d for d in raw_demands if getattr(d, "is_hybrid_05", False)]
-        normal_demands = [d for d in raw_demands if not getattr(d, "is_hybrid_05", False)]
+        # ── SEPARACIÓN DE DEMANDAS (GENERALIZADO) ──
+        # Para raw_need=0.5: toda la demand es híbrida (need=1)
+        # Para raw_need=1.5: se splitea en demand normal (need=1) + demand híbrida (need=1)
+        # Para raw_need=2.5: se splitea en demand normal (need=2) + demand híbrida (need=1)
+        # Para raw_need=1.0, 2.0, 3.0: toda la demand es normal
+        hybrid_demands = []
+        normal_demands = []
+        for d in raw_demands:
+            if d.has_hybrid_component and d.normal_need >= 1:
+                # Splitear: crear demand normal con la parte entera
+                normal_dm = Demand((d.id, d.date, d.wsid, d.wsname, d.start, d.end, float(d.normal_need)))
+                normal_demands.append(normal_dm)
+                # Crear demand híbrida con la parte .5
+                hyb_id = f"{d.id}::hyb"
+                hyb_dm = Demand((hyb_id, d.date, d.wsid, d.wsname, d.start, d.end, 0.5))
+                hybrid_demands.append(hyb_dm)
+            elif d.has_hybrid_component and d.normal_need == 0:
+                # Pure 0.5 → solo híbrido
+                hybrid_demands.append(d)
+            else:
+                # Demand entera normal
+                normal_demands.append(d)
 
         normal_demands = coalesce_demands(normal_demands, tolerate_gap_min=0)
         normal_demands = normalize_by_max_need_profile(normal_demands)
 
         demands = normal_demands + hybrid_demands
-        print(f"[DATA] {len(demands)} demands | hybrid_pairs={len(hybrid_pairs)}")
+        print(f"[DATA] {len(demands)} demands ({len(normal_demands)} normal + {len(hybrid_demands)} hybrid) | hybrid_pairs={len(hybrid_pairs)}")
 
         # ── EMPLEADOS (CORREGIDO: ComplementHours, no IsSplitShift) ──
         emps_map = {
@@ -1029,20 +1062,71 @@ def coalesce_employee_day_workstation(assigns_day):
 def generate_ai(week_start: date):
     emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map = load_data(week_start)
 
-    # ── PLAN USERSHIFT MODES (NUEVO) ──
+    # ── PLAN USERSHIFT MODES ──
     overrides, usershift_plan = plan_usershift_day_modes(emps, demands, week)
 
-    # ── ENTRENAR/CARGAR MODELO IA ──
+    # ── CARGAR/ENTRENAR MODELO IA (ITERATIVO v5.0) ──
+    # Estrategia:
+    #   1) SIEMPRE entrenar modelo fresco desde BD (últimas 12 semanas) + CSV si existe
+    #   2) Si hay modelo activo previo en BD, hacer merge para heredar patrones acumulados
+    #   3) El merge usa decay para que datos viejos pierdan peso gradualmente
+    # Esto garantiza que siempre hay datos frescos de BD (no solo el pickle viejo).
     from services.aprendizaje_historico import AprendizajeHistoricoService
-    ai_svc = AprendizajeHistoricoService(debug=True)
+    modelo = None
     csv_path = CSV_ENTRENAMIENTO if os.path.exists(CSV_ENTRENAMIENTO) else None
-    if csv_path:
-        print(f"[AI] Entrenando desde CSV: {csv_path}")
-        ai_svc.entrenar_desde_csv(csv_path)
-    else:
-        print("[AI] CSV no encontrado, modelo vacío")
-        ai_svc._modelo = ModeloPatrones()
-    modelo = ai_svc.modelo
+    t_start = week_start - timedelta(days=84)
+
+    try:
+        with conn() as c_ai, c_ai.cursor() as cur_ai:
+            ai_svc = AprendizajeHistoricoService(cursor=cur_ai, debug=True)
+
+            # Paso 1: Extraer modelo fresco de BD + CSV
+            if csv_path:
+                ai_svc.entrenar_combinado(csv_path, t_start, week[-1])
+                print(f"[AI] Modelo fresco CSV+BD entrenado "
+                      f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})")
+            else:
+                ai_svc.entrenar_desde_bd(t_start, week[-1])
+                print(f"[AI] Modelo fresco BD entrenado "
+                      f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})")
+            modelo_fresco = ai_svc.modelo
+
+            # Paso 2: Intentar cargar modelo previo para heredar aprendizaje acumulado
+            modelo_previo = None
+            try:
+                ai_prev = AprendizajeHistoricoService(cursor=cur_ai, debug=False)
+                if ai_prev._cargar_modelo_activo() and ai_prev.modelo:
+                    modelo_previo = ai_prev.modelo
+                    print(f"[AI] Modelo previo encontrado "
+                          f"(v={modelo_previo.version}, reg={modelo_previo.registros_procesados})")
+            except Exception:
+                pass
+
+            # Paso 3: Merge si hay modelo previo
+            # Fresco = sin decay (base), Previo = con decay (boost heredado)
+            if modelo_previo:
+                # En _merge_modelos, el primer arg (base) recibe decay.
+                # Queremos que el previo reciba decay, no el fresco.
+                # Así que: base=previo (con decay), nuevo=fresco (se suma completo)
+                modelo = ai_svc._merge_modelos(modelo_previo, modelo_fresco, decay=0.3)
+                print(f"[AI] Merge: previo(decay=0.3) + fresco(completo) → "
+                      f"{len(modelo.afinidad_emp_ws)} afinidades")
+            else:
+                modelo = modelo_fresco
+                print(f"[AI] Primera tirada, usando modelo fresco")
+
+    except Exception as e:
+        print(f"[AI] Error cargando modelo BD: {e}, fallback a CSV/vacío")
+        ai_svc_fallback = AprendizajeHistoricoService(debug=True)
+        if csv_path:
+            ai_svc_fallback.entrenar_desde_csv(csv_path)
+            modelo = ai_svc_fallback.modelo
+        else:
+            ai_svc_fallback._modelo = ModeloPatrones()
+            modelo = ai_svc_fallback._modelo
+
+    if modelo is None:
+        modelo = ModeloPatrones()
 
     # ── GENERAR SCHEDULE (con overrides + híbridos nativos) ──
     hybrid_groups = build_hybrid_groups(demands, hybrid_pairs)
@@ -1052,7 +1136,7 @@ def generate_ai(week_start: date):
         emps=emps, demands=demands, week=week,
         overrides=overrides,
         hybrid_groups=hybrid_groups,
-        min_coverage_pct=80.0,
+        min_coverage_pct=90.0,
     )
 
     # ── HYBRID 0.5 FALLBACK (solo remata huecos restantes) ──
@@ -1095,7 +1179,7 @@ def generate_ai(week_start: date):
             "days_off_violations": days_off_diag,
             "coverage": round((total_cov / total_req) * 100, 1) if total_req else 100,
             "flexible_mode": True,
-            "solver": "ai_pattern_v6_hybrid_fixed",
+            "solver": "ai_iterative_v5_hybrid_gen",
         },
         "coverage_details": {
             d_id: {
@@ -1167,7 +1251,7 @@ def cleanup_null_workstation_schedules(cur, ws, we):
 
 @app.route('/api/health')
 def health():
-    st = {"status": "checking", "timestamp": now().isoformat(), "version": "6.0-hybrid-fixed", "checks": {}}
+    st = {"status": "checking", "timestamp": now().isoformat(), "version": "5.0-iterative-hybrid-gen", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
@@ -1389,18 +1473,42 @@ def save():
                               timedelta(hours=e_t.hour, minutes=e_t.minute),
                               obs, False, now(), token))
 
-            # ═════ HU 1.4 POST-SAVE TRAINING (con feedback loop v4.2) ═════
+            # ═════ HU 1.4 POST-SAVE TRAINING (INCREMENTAL v5.0) ═════
+            # Carga modelo activo existente y lo enriquece con los datos
+            # nuevos de esta semana, para que la siguiente tirada
+            # aproveche el aprendizaje acumulado.
             cur.execute("SAVEPOINT hu14")
             try:
                 from services.aprendizaje_historico import AprendizajeHistoricoService
                 ai_post = AprendizajeHistoricoService(cur, debug=True)
                 t_start = ws - timedelta(days=84)
-                # v4.2: entrenar_desde_bd ahora lee también Gaps, Quality y Suggestions
-                ai_post.entrenar_desde_bd(t_start, we)
+
+                # 1) Intentar cargar modelo activo previo
+                had_prev = ai_post._cargar_modelo_activo()
+                if had_prev and ai_post.modelo:
+                    prev_modelo = ai_post.modelo
+                    print(f"[HU1.4] Modelo previo cargado (sem={prev_modelo.semanas_procesadas})")
+                    # 2) Extraer patrones nuevos solo de BD reciente
+                    nuevo_modelo = ai_post._extractor.extraer_de_bd(cur, t_start, we)
+                    # 3) Merge: acumular patrones viejos + nuevos
+                    ai_post._modelo = ai_post._merge_modelos(prev_modelo, nuevo_modelo)
+                else:
+                    # Sin modelo previo: entrenar desde cero con BD completa
+                    ai_post.entrenar_desde_bd(t_start, we)
+
+                # 4) Enriquecer con feedback de esta tirada
+                ai_post._enriquecer_con_gaps(t_start, we)
+                ai_post._enriquecer_con_quality_scores(t_start, we)
+                ai_post._enriquecer_con_sugerencias(t_start, we)
+                ai_post._enriquecer_con_violaciones(t_start, we)
+                ai_post._enriquecer_con_hibridos(t_start, we)
+
+                # 5) Guardar modelo actualizado como activo
                 mid = ai_post.guardar_modelo(nombre="auto", version=f"auto-{ws.isoformat()}")
                 try:
                     coverage_pct = float(res.get("coverage_pct", 0))
                     notes_parts = [f"post-save {token}"]
+                    notes_parts.append(f"incremental={'yes' if had_prev else 'no'}")
                     if quality_result:
                         notes_parts.append(f"score={quality_result.get('score', 0):.1f}")
                     notes_parts.append(f"gaps={inserted_gaps}")
@@ -1410,7 +1518,7 @@ def save():
                         notes=" | ".join(notes_parts),
                         coverage_improvement=coverage_pct)
                 except: pass
-                print(f"[HU1.4] Modelo guardado: {mid} (con feedback de gaps/quality/suggestions)")
+                print(f"[HU1.4] Modelo {'incremental' if had_prev else 'nuevo'} guardado: {mid}")
                 cur.execute("RELEASE SAVEPOINT hu14")
             except Exception as e:
                 try: cur.execute("ROLLBACK TO SAVEPOINT hu14")
@@ -1434,11 +1542,11 @@ def save():
     out["summary"]["hu13_suggestions_generated"] = len(sugerencias_generadas) if sugerencias_generadas else 0
     out["summary"]["hu14_ai_adjustments"] = len(ajustes_ia) if ajustes_ia else 0
 
-    return jsonify({"message": "Horario guardado (IA v6 corregida)", **out}), 201
+    return jsonify({"message": "Horario guardado (IA v5.0 iterativa)", **out}), 201
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 if __name__ == "__main__":
-    print("API Gandarias v6 corregida (IA + híbridos reales) en http://localhost:5000")
+    print("API Gandarias v5.0 (IA iterativa + híbridos generalizados) en http://localhost:5000")
     print(f"CSV entrenamiento: {CSV_ENTRENAMIENTO}")
     app.run(host="0.0.0.0", port=5000, debug=False)

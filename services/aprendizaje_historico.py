@@ -140,7 +140,8 @@ class AprendizajeHistoricoService:
         if self.cur:
             try:
                 modelo_bd = self._extractor.extraer_de_bd(self.cur, fecha_inicio, fecha_fin)
-                self._modelo = self._merge_modelos(modelo_csv, modelo_bd)
+                # CSV mantiene peso completo (decay=0 → sin reducción), BD se suma encima
+                self._modelo = self._merge_modelos(modelo_csv, modelo_bd, decay=1.0)
             except Exception as e:
                 self._log(f"BD fallback a solo CSV: {e}")
                 self._modelo = modelo_csv
@@ -328,14 +329,32 @@ class AprendizajeHistoricoService:
     # Merge / getter
     # ═══════════════════════════════════════════════════════════════
 
-    def _merge_modelos(self, base: ModeloPatrones, nuevo: ModeloPatrones) -> ModeloPatrones:
+    def _merge_modelos(self, base: ModeloPatrones, nuevo: ModeloPatrones, decay: float = 0.85) -> ModeloPatrones:
+        """
+        Merge incremental: combina patrones del modelo base (previo) con el nuevo.
+        El decay (0.85) reduce la influencia del modelo viejo en cada iteración,
+        dando más peso a los datos recientes. Esto permite que la IA 'olvide'
+        gradualmente patrones obsoletos.
+        """
         merged = ModeloPatrones(
-            version=nuevo.version,
+            version=nuevo.version or base.version,
             fecha_entrenamiento=nuevo.fecha_entrenamiento,
-            registros_procesados=base.registros_procesados + nuevo.registros_procesados,
+            registros_procesados=int(base.registros_procesados * decay) + nuevo.registros_procesados,
             semanas_procesadas=max(base.semanas_procesadas, nuevo.semanas_procesadas),
         )
-        merged.afinidad_emp_ws = dict(base.afinidad_emp_ws)
+        # Afinidad emp-ws: decay frecuencia vieja + sumar nueva
+        merged.afinidad_emp_ws = {}
+        for k, v in base.afinidad_emp_ws.items():
+            decayed = type(v)(
+                emp_id=v.emp_id,
+                ws_id=v.ws_id,
+                frecuencia=max(1, int(v.frecuencia * decay)),
+                horas_promedio=v.horas_promedio,
+                dias_frecuentes=v.dias_frecuentes,
+                horarios=v.horarios,
+                obs_frecuente=v.obs_frecuente,
+            )
+            merged.afinidad_emp_ws[k] = decayed
         for k, v in nuevo.afinidad_emp_ws.items():
             if k in merged.afinidad_emp_ws:
                 old = merged.afinidad_emp_ws[k]
@@ -351,11 +370,25 @@ class AprendizajeHistoricoService:
                 )
             else:
                 merged.afinidad_emp_ws[k] = v
+
+        # Horarios ws: preferir nuevos, decay viejos que no se actualizan
         merged.horarios_ws = dict(base.horarios_ws)
         merged.horarios_ws.update(nuevo.horarios_ws)
+
+        # Carga emp: preferir nuevos, mantener viejos como fallback
         merged.carga_emp = dict(base.carga_emp)
         merged.carga_emp.update(nuevo.carga_emp)
-        merged.obs_global = dict(base.obs_global)
+
+        # obs_global: merge con decay en contadores numéricos
+        merged.obs_global = {}
+        for k, v in base.obs_global.items():
+            if isinstance(v, (int, float)):
+                merged.obs_global[k] = v * decay
+            elif isinstance(v, dict):
+                merged.obs_global[k] = {k2: (v2 * decay if isinstance(v2, (int, float)) else v2)
+                                         for k2, v2 in v.items()}
+            else:
+                merged.obs_global[k] = v
         for k, v in nuevo.obs_global.items():
             if isinstance(v, (int, float)):
                 merged.obs_global[k] = merged.obs_global.get(k, 0) + v
@@ -369,6 +402,9 @@ class AprendizajeHistoricoService:
                 merged.obs_global[k] = cur
             else:
                 merged.obs_global[k] = v
+
+        self._log(f"Merge: base({base.registros_procesados}reg) + nuevo({nuevo.registros_procesados}reg) "
+                  f"→ merged({merged.registros_procesados}reg, {len(merged.afinidad_emp_ws)} afinidades) decay={decay}")
         return merged
 
     @property
