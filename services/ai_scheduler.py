@@ -719,23 +719,20 @@ class AIScheduleGenerator:
             for reason, cnt in reject_reasons.most_common(10):
                 self._log(f"  {reason}: {cnt}")
 
-        # ── ÚLTIMO RECURSO: pase agresivo relajando múltiples reglas ──
-        if coverage < min_coverage_pct:
-            self._log(f"[LAST-RESORT] cobertura {coverage}% < {min_coverage_pct}% → relajando reglas")
-            orig_reglas = dict(self.reglas)
-            orig_val_reglas = dict(self.validador.reglas)
-            try:
-                # Relajar: +2 días trabajo, +2h/día
-                self.validador.reglas["max_dias_trabajo_semana"] = orig_reglas.get("max_dias_trabajo_semana", 5) + 2
-                self.validador.reglas["max_horas_por_dia"] = orig_reglas.get("max_horas_por_dia", 9) + 2
-                self.reglas["max_dias_trabajo_semana"] = self.validador.reglas["max_dias_trabajo_semana"]
-                self.reglas["max_horas_por_dia"] = self.validador.reglas["max_horas_por_dia"]
-                filled = self._pase_extra(emps, demands, sched, estados, coverage_stats, remaining, overrides, prom_min * 20.0, "LAST-RESORT")
-                self._fase_hibridos(emps, hybrid_groups, sched, estados, coverage_stats, remaining, overrides, prom_min)
-            finally:
-                self.validador.reglas = orig_val_reglas
-                self.reglas = orig_reglas
-            coverage = self._coverage_pct_from_cov(coverage_stats)
+            # Diagnóstico por workstation: qué puestos quedan descubiertos y cuántos emps los cubren
+            ws_unmet = Counter()
+            ws_names = {}
+            for dm in unmet_demands:
+                ws_unmet[str(dm.wsid)] += remaining.get(dm.id, 0)
+                ws_names[str(dm.wsid)] = getattr(dm, 'wsname', str(dm.wsid))
+            self._log(f"[DIAG-WS] Workstations con demands unmet ({len(ws_unmet)}):")
+            for wsid, unmet_cnt in ws_unmet.most_common(15):
+                n_emps_with_skill = sum(1 for e in emps if e.can(wsid if not isinstance(wsid, str) else next((dm.wsid for dm in demands if str(dm.wsid) == wsid), None)))
+                self._log(f"  {ws_names.get(wsid, wsid)[:25]:25s} unmet={unmet_cnt:3d} emps_habilitados={n_emps_with_skill:2d}")
+
+        # NOTA: NO se relajan reglas duras (max_horas_dia, etc.) para evitar
+        # violaciones de solapamiento y restricciones. La cobertura se maximiza
+        # solo con +1 día de trabajo (regla blanda según PDF sección 4.2).
 
         for cs in coverage_stats.values():
             n = cs["demand"].need
@@ -783,7 +780,7 @@ class AIScheduleGenerator:
 
     def _asignar_hibrido(self, emp, grp, sched, estados, cov, remaining):
         for dm in getattr(grp, "demands", []):
-            dm.observation_override = "HYB|BT"
+            dm.observation_override = "BT"
             if str(dm.wsid) == str(grp.wsid_a):
                 dm.hybrid_partner_wsid = grp.wsid_b
             elif str(dm.wsid) == str(grp.wsid_b):

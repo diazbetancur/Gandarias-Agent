@@ -37,6 +37,13 @@ MAX_HOURS_PER_DAY = 9
 MIN_SHIFT_DURATION_HOURS = 3
 MAX_DAYS_PER_WEEK = 6
 
+# ───────── MODO DE HORAS ─────────
+# True  = Respeta ComplementHours y LawApply. Cap semanal = min(HiredHours, MAX_HOURS_PER_WEEK)
+#         o MAX_HOURS_PER_WEEK si ComplementHours=True. Nunca excede 38h (o lo que diga la ley).
+# False = Usa TODAS las horas contratadas (HiredHours) como límite, sin cap de ley.
+#         Ideal para ocupar toda la capacidad contratada del empleado.
+STRICT_HOURS_MODE = False
+
 CSV_ENTRENAMIENTO = os.environ.get(
     "CSV_ENTRENAMIENTO",
     os.path.join(os.path.dirname(__file__), "_Schedules__202601300806.csv"),
@@ -110,9 +117,15 @@ class Emp:
     def weekly_hours_limit(self):
         """
         Límite semanal duro (MINUTOS):
-        - ComplementHours=True  -> cap = MAX_HOURS_PER_WEEK (ley), aunque HiredHours sea menor
-        - ComplementHours=False -> cap = min(HiredHours, MAX_HOURS_PER_WEEK)
-        Nunca se excede el máximo semanal.
+        
+        STRICT_HOURS_MODE = True:
+          - ComplementHours=True  -> cap = MAX_HOURS_PER_WEEK (ley)
+          - ComplementHours=False -> cap = min(HiredHours, MAX_HOURS_PER_WEEK)
+        
+        STRICT_HOURS_MODE = False:
+          - cap = max(HiredHours, MAX_HOURS_PER_WEEK)
+          - Ocupa toda la capacidad posible: si tiene 25h + complementarias,
+            puede llegar a 38h. Si tiene 40h contratadas, usa las 40h.
         """
         hired = int(self.hired_hours or 0)
         if hired <= 0:
@@ -121,16 +134,21 @@ class Emp:
 
         law_cap = int(MAX_HOURS_PER_WEEK or 0)
         if law_cap <= 0:
-            law_cap = hired  # fallback defensivo
+            law_cap = hired
 
-        if bool(self.complement_hours):
-            cap_h = law_cap
+        if STRICT_HOURS_MODE:
+            if bool(self.complement_hours):
+                cap_h = law_cap
+            else:
+                cap_h = min(hired, law_cap)
         else:
-            cap_h = min(hired, law_cap)
+            # Modo relajado: máximo entre contratadas y ley
+            # - 25h + complement → max(25, 38) = 38h
+            # - 40h sin complement → max(40, 38) = 40h
+            # - 38h normal → max(38, 38) = 38h
+            cap_h = max(hired, law_cap)
 
-        # atributo usado por HU 1.1 (explicador_huecos) si existe
         self.max_week_hours = int(cap_h)
-
         return int(cap_h * 60)
 
     def available(self, d: date, s: time, e: time) -> bool:
@@ -543,8 +561,8 @@ def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, over
                 best_score = score
         if best is None:
             continue
-        grp.dm_a.observation_override = "HYB|BT"
-        grp.dm_b.observation_override = "HYB|BT"
+        grp.dm_a.observation_override = "BT"
+        grp.dm_b.observation_override = "BT"
         sched[grp.date].append((best, grp.dm_a))
         sched[grp.date].append((best, grp.dm_b))
         estados[str(best.id)].registrar(grp.date, f"HYB:{grp.wsid_a}|{grp.wsid_b}", _t2m(grp.start), _t2m(_end_eff(grp.end)))
@@ -770,7 +788,7 @@ def load_data(week_start: date):
             emp = emps_map[uid4]
             if rt == 0:
                 emp.absent.add(d_exc)
-                emp.abs_reason[d_exc] = emp.abs_reason.get(d_exc, 'VAC')
+                emp.abs_reason[d_exc] = 'ABS'
             else:
                 s = _to_time(f); e = _to_time(t)
                 if s and e and s < e:
@@ -788,7 +806,7 @@ def load_data(week_start: date):
             emp = emps_map[uid5]
             d0 = max(sd, week_start)
             while d0 <= ed:
-                emp.absent.add(d0); emp.abs_reason[d0] = 'VAC'
+                emp.absent.add(d0); emp.abs_reason[d0] = 'ABS'
                 d0 += timedelta(days=1)
 
         # ShiftTypes
@@ -1005,6 +1023,17 @@ def load_data(week_start: date):
         }
 
         print(f"[DATA] {len(emps)} empleados, {len(demands)} demands OK")
+        if ASCII_LOGS:
+            print(f"[DATA] STRICT_HOURS_MODE={STRICT_HOURS_MODE} | MAX_HOURS_PER_WEEK={MAX_HOURS_PER_WEEK}")
+            # Mostrar distribución de caps
+            caps = {}
+            for e in emps:
+                cap_min = e.weekly_hours_limit()
+                cap_h = cap_min // 60
+                caps[cap_h] = caps.get(cap_h, 0) + 1
+            cap_summary = sorted(caps.items())
+            total_cap = sum(c * n for c, n in cap_summary)
+            print(f"[DATA] Caps semanales: {cap_summary} | Capacidad total: {total_cap}h")
         return emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map
 
 
@@ -1206,11 +1235,12 @@ def generate_ai(week_start: date):
             cur_end_min = _t2m(_end_eff(dm.end))
 
             if getattr(dm, "observation_override", None):
-                base_obs = dm.observation_override or "HYB|BT"
-                if base_obs.startswith("HYB|"):
-                    obs = "HYB|C" if dm.end == time(23, 59) else "HYB|BT"
-                else:
-                    obs = base_obs
+                obs = dm.observation_override
+                # Normalizar: solo C o BT
+                if obs.startswith("HYB|"):
+                    obs = obs.replace("HYB|", "")
+                if dm.end == time(23, 59):
+                    obs = "C"
             elif dm.wsid is None:
                 obs = emp.abs_reason.get(d, "ABS")
             else:
@@ -1440,6 +1470,11 @@ def save():
 
                 coalesced = coalesce_employee_day_workstation(ass)
 
+                # ── PRE-FILTRO: detectar solapamientos inter-workstation ──
+                # Agrupar todos los bloques por empleado para detectar si tiene
+                # turnos en workstations diferentes que se solapan en tiempo
+                emp_intervals_saved = defaultdict(list)  # eid → [(s_min, e_min, wsid)]
+
                 for (eid, wsid), rows in coalesced.items():
                     if wsid is None:
                         continue
@@ -1453,14 +1488,72 @@ def save():
                                 print(f"[SAVE-MIN] {d} omitido {nm}: {dur_min/60:.1f}h<{MIN_SHIFT_DURATION_HOURS}h")
                             continue
 
+                        # ── VALIDACIÓN: no guardar si el WS vino de ROLE_FALLBACKS ──
+                        if hasattr(emp, 'roles_originales') and wsid not in emp.roles_originales:
+                            if ASCII_LOGS:
+                                print(f"[SAVE-SKIP] {d} {emp.name}: ws={wsid} no en roles_originales")
+                            continue
+
                         s_t = _m2t(s_min)
                         e_t = _m2t(e_min if e_min < 1440 else 0)
-                        is_hyb = any((getattr(src_dm, "observation_override", "") or "").startswith("HYB|") for src_dm in src_dms)
 
-                        if is_hyb:
-                            obs = "HYB|C" if e_t == time(23, 59) else "HYB|BT"
-                        else:
-                            obs = "C" if e_t == time(23, 59) else "BT"
+                        # ── VALIDACIÓN: verificar ventana de disponibilidad ──
+                        if not emp.available(d, s_t, e_t):
+                            win = emp.exc.get(d) or emp.window.get(d.weekday())
+                            trimmed = False
+                            if win:
+                                best_end = None
+                                for a, b in win:
+                                    b2 = b if b != time(0, 0) else time(23, 59)
+                                    if s_t >= a and s_t < b2:
+                                        if best_end is None or _t2m(b2) > _t2m(best_end):
+                                            best_end = b2
+                                if best_end and _t2m(best_end) > s_min:
+                                    e_min_new = _t2m(best_end)
+                                    if (e_min_new - s_min) >= MIN_BLOCK_SAVE_MIN:
+                                        e_min = e_min_new
+                                        e_t = best_end
+                                        s_t = _m2t(s_min)
+                                        trimmed = True
+                                        if ASCII_LOGS:
+                                            print(f"[SAVE-TRIM] {d} {emp.name}: recortado a {s_t}-{e_t}")
+                            if not trimmed:
+                                if ASCII_LOGS:
+                                    print(f"[SAVE-SKIP] {d} {emp.name}: {s_t}-{e_t} fuera de ventana")
+                                continue
+
+                        # ── VALIDACIÓN: solapamiento inter-workstation ──
+                        # Detectar si es híbrido por hybrid_group_id o hybrid_partner_wsid
+                        is_hyb = any(
+                            getattr(src_dm, "hybrid_group_id", None) is not None
+                            or getattr(src_dm, "hybrid_partner_wsid", None) is not None
+                            for src_dm in src_dms
+                        )
+                        has_overlap = False
+                        for prev_s, prev_e, prev_ws, prev_hyb in emp_intervals_saved.get(eid, []):
+                            if str(prev_ws) == str(wsid):
+                                continue  # Mismo WS, ya coalescido
+                            overlaps = not (e_min <= prev_s or s_min >= prev_e)
+                            if not overlaps:
+                                continue
+                            # Dos HYB solapándose es válido (es un turno híbrido)
+                            if is_hyb and prev_hyb:
+                                continue
+                            # Cualquier otra combinación es solapamiento real
+                            has_overlap = True
+                            if ASCII_LOGS:
+                                print(f"[SAVE-OVERLAP] {d} {emp.name}: {_m2t(s_min)}-{_m2t(e_min)} ws={wsid}(hyb={is_hyb}) solapa con ws={prev_ws}(hyb={prev_hyb})")
+                            break
+                        if has_overlap:
+                            continue
+
+                        # Registrar intervalo para detección de solapamientos futuros
+                        emp_intervals_saved[eid].append((s_min, e_min, wsid, is_hyb))
+
+                        # ── GUARDAR ──
+                        s_t = _m2t(s_min)
+                        e_t = _m2t(e_min if e_min < 1440 else 0)
+                        obs = "C" if e_t == time(23, 59) else "BT"
 
                         cur.execute('''
                             INSERT INTO "Management"."Schedules"
