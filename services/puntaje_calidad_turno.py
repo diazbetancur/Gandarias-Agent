@@ -196,6 +196,68 @@ def _build_sched_index(sched: Dict[date, List[Tuple[Any, Any]]]) -> Dict[Tuple[d
 
     return idx
 
+
+def _build_sched_index_from_bd(cur, token: str, ws: date, we: date) -> Dict[Tuple[date, str], Dict[str, List[Tuple[int, int]]]]:
+    """
+    Construye el índice de cobertura leyendo los Schedules YA GUARDADOS en BD.
+    Esto es más preciso que usar el sched interno porque refleja exactamente
+    lo que se guardó (después de coalescencia, filtros, trims, etc.).
+    """
+    cur.execute(
+        '''
+        SELECT s."Date", s."UserId"::text, s."WorkstationId"::text,
+               s."StartTime", s."EndTime"
+        FROM "Management"."Schedules" s
+        WHERE COALESCE(s."IsDeleted", false) = false
+          AND s."WorkstationId" IS NOT NULL
+          AND s."StartTime" IS NOT NULL
+          AND s."EndTime" IS NOT NULL
+          AND s."Token" = %s
+          AND s."Date" BETWEEN %s AND %s
+        ORDER BY s."Date", s."UserId", s."StartTime"
+        ''',
+        (token, ws, we),
+    )
+    rows = cur.fetchall() or []
+
+    idx: Dict[Tuple[date, str], Dict[str, List[Tuple[int, int]]]] = {}
+    for row_date, user_id, ws_id, start_interval, end_interval in rows:
+        d = row_date.date() if hasattr(row_date, 'date') else row_date
+        if not user_id or not ws_id:
+            continue
+
+        # Convertir interval/timedelta a time
+        def _iv_to_time(iv):
+            if iv is None:
+                return time(0, 0)
+            if isinstance(iv, time):
+                return iv
+            if isinstance(iv, timedelta):
+                total_sec = int(iv.total_seconds())
+                h = (total_sec // 3600) % 24
+                m = (total_sec % 3600) // 60
+                return time(h, m)
+            try:
+                total_sec = int(iv.total_seconds())
+                h = (total_sec // 3600) % 24
+                m = (total_sec % 3600) // 60
+                return time(h, m)
+            except:
+                return time(0, 0)
+
+        st = _iv_to_time(start_interval)
+        en = _iv_to_time(end_interval)
+        s_min, e_min = _interval_min(d, st, en)
+
+        idx.setdefault((d, ws_id), {}).setdefault(user_id, []).append((s_min, e_min))
+
+    # merge por empleado
+    for key, per_emp in idx.items():
+        for emp_id, intervals in list(per_emp.items()):
+            per_emp[emp_id] = _merge_intervals(intervals)
+
+    return idx
+
 def _covered_for_demand(
     d: date,
     wsid: str,
@@ -479,7 +541,13 @@ class ScheduleQualityService:
             )
         except Exception as _e:
             print(f"[HU1.2] WARN: no se pudo limpiar ScheduleQualityShiftScores para token={token}: {_e}")
-        sched_idx = _build_sched_index(sched)
+
+        # FIX v5.0: Usar índice desde BD (Schedules guardados) en vez del sched interno.
+        # Esto refleja exactamente lo que se guardó después de coalescencia/filtros/trims.
+        sched_idx = _build_sched_index_from_bd(self.cur, token, ws, we)
+        if not sched_idx:
+            # Fallback al sched interno si no hay datos en BD aún (ej: preview sin save)
+            sched_idx = _build_sched_index(sched)
 
         inserted = 0
         now_dt = datetime.utcnow()
@@ -593,13 +661,18 @@ class ScheduleQualityService:
     ) -> Dict[str, Any]:
         """
         Calcula y guarda scores.
-        FIX v4.3: la cobertura se recalcula desde BD para evitar falsos 0%.
+        FIX v5.0: la cobertura se recalcula desde Schedules guardados en BD
+        para reflejar exactamente lo que se guardó (coalescido, filtrado, trimmed).
         """
         print(f"[HU1.2] Iniciando cálculo calidad. token={token} ws={ws} we={we}")
 
         template_id, _ = _pick_template_id(self.cur)
         demands = _fetch_demands_week(self.cur, week_start=ws, template_id=template_id)
-        sched_idx = _build_sched_index(sched)
+
+        # FIX v5.0: Usar índice desde BD en vez del sched interno
+        sched_idx = _build_sched_index_from_bd(self.cur, token, ws, we)
+        if not sched_idx:
+            sched_idx = _build_sched_index(sched)
 
         required_total = 0.0
         covered_total = 0.0

@@ -39,7 +39,7 @@ from uuid import uuid4
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TipoSugerencia(str, Enum):
-    CONTRATAR_PERSONAL = "CONTRATAR_PERSONAL"
+    CONTRATAR_PERSONAL = "COPACITAR_PERSONAL"
     CAPACITAR_EMPLEADO = "CAPACITAR_EMPLEADO"
     AJUSTAR_VENTANA = "AJUSTAR_VENTANA"
     REDISTRIBUIR_CARGA = "REDISTRIBUIR_CARGA"

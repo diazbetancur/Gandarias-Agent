@@ -60,7 +60,7 @@ app = Flask(__name__)
 CORS(app)
 
 DB = {
-    "host": "database-gandarias.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com",
+    "host": "database-gandarias-restore.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com",
     "port": 5432, "dbname": "postgresqa",
     "user": "postgres", "password": "MyStrongPassword!123_",
 }
@@ -1088,6 +1088,74 @@ def coalesce_employee_day_workstation(assigns_day):
 # GENERATE (IA + UserShift + Hybrid)
 # ═══════════════════════════════════════════════════════════════════
 
+def load_previous_suggestions(week_start, week_end):
+    """
+    Lee sugerencias previas de ScheduleSuggestions para esta semana.
+    Retorna hints que el scorer usa para ajustar asignaciones:
+    - emps_sin_asignacion: set de nombres de empleados que no tuvieron turno
+    - emps_sobrecargados: set de nombres con >130% promedio
+    - emps_subutilizados: set de nombres con <70% promedio
+    - ws_con_gaps: dict {ws_name: n_gaps} workstations con huecos
+    """
+    hints = {
+        "emps_sin_asignacion": set(),
+        "emps_sobrecargados": set(),
+        "emps_subutilizados": set(),
+        "ws_con_gaps": {},
+    }
+    try:
+        with conn() as c, c.cursor() as cur:
+            cur.execute('''
+                SELECT "Tipo", "Prioridad", "Detalles", "EmpleadosInvolucrados",
+                       "WorkstationsAfectadas"
+                FROM "Management"."ScheduleSuggestions"
+                WHERE "WeekStart" = %s AND "WeekEnd" = %s
+                ORDER BY "CreatedAt" DESC
+            ''', (week_start, week_end))
+            rows = cur.fetchall()
+            if not rows:
+                return hints
+
+            import json
+            for tipo, prio, detalles, emps_json, ws_json in rows:
+                tipo = str(tipo or "")
+                detalles = detalles if isinstance(detalles, dict) else {}
+                emps_list = emps_json if isinstance(emps_json, list) else []
+                ws_list = ws_json if isinstance(ws_json, list) else []
+
+                if tipo == "REDISTRIBUIR_CARGA":
+                    sin_asig = detalles.get("sin_asignacion", [])
+                    if sin_asig:
+                        for name in sin_asig:
+                            hints["emps_sin_asignacion"].add(str(name).strip().upper())
+                    # Empleados sobrecargados/subutilizados vienen en EmpleadosInvolucrados
+                    if "130%" in str(prio) or "sobrecarga" in str(detalles).lower() or "superior" in str(detalles).lower():
+                        for name in emps_list:
+                            hints["emps_sobrecargados"].add(str(name).strip().upper())
+                    if "inferior" in str(detalles).lower() or "capacidad" in str(detalles).lower():
+                        for name in emps_list:
+                            hints["emps_subutilizados"].add(str(name).strip().upper())
+
+                if tipo == "CONTRATAR_PERSONAL":
+                    gaps = detalles.get("gaps_detectados", 0)
+                    for ws_name in ws_list:
+                        hints["ws_con_gaps"][str(ws_name).strip().upper()] = max(
+                            hints["ws_con_gaps"].get(str(ws_name).strip().upper(), 0),
+                            int(gaps)
+                        )
+
+            n_sin = len(hints["emps_sin_asignacion"])
+            n_sobre = len(hints["emps_sobrecargados"])
+            n_sub = len(hints["emps_subutilizados"])
+            n_ws = len(hints["ws_con_gaps"])
+            print(f"[SUGERENCIAS] Cargadas {len(rows)} sugerencias previas: "
+                  f"{n_sin} sin asig, {n_sobre} sobrecargados, {n_sub} subutilizados, {n_ws} ws con gaps")
+    except Exception as e:
+        print(f"[SUGERENCIAS] Error cargando: {e}")
+
+    return hints
+
+
 def generate_ai(week_start: date):
     emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map = load_data(week_start)
 
@@ -1157,15 +1225,23 @@ def generate_ai(week_start: date):
     if modelo is None:
         modelo = ModeloPatrones()
 
+    # ── CARGAR SUGERENCIAS PREVIAS DE ESTA SEMANA ──
+    we = week_start + timedelta(days=6)
+    suggestion_hints = load_previous_suggestions(week_start, we)
+
     # ── GENERAR SCHEDULE (con overrides + híbridos nativos) ──
     hybrid_groups = build_hybrid_groups(demands, hybrid_pairs)
     print(f"[AI] hybrid_groups construidos={len(hybrid_groups)}")
     generator = AIScheduleGenerator(modelo=modelo, reglas=reglas, debug=True)
+    # Pasar hints de sugerencias al scorer
+    generator.scorer.suggestion_hints = suggestion_hints
+    # Crear mapa de nombres para que el scorer pueda buscar por nombre
+    generator.scorer._emp_name_map = {str(e.id): e.name.strip().upper() for e in emps}
     sched, coverage_stats, days_off_diag = generator.generar(
         emps=emps, demands=demands, week=week,
         overrides=overrides,
         hybrid_groups=hybrid_groups,
-        min_coverage_pct=90.0,
+        min_coverage_pct=91.0,
     )
 
     # ── HYBRID 0.5 FALLBACK (solo remata huecos restantes) ──
