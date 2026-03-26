@@ -306,6 +306,156 @@ class ValidadorReglasService:
             return 0
 
     def validar_y_guardar(self, sched, token, week_start, week_end, emps=None, is_post_ai=False):
-        r = self.validar(sched, emps)
+        # FIX v5.0: Intentar validar desde BD (Schedules guardados = bloques coalescidos)
+        # para evitar falsos positivos por demands granulares de 15 min.
+        r = self._validar_desde_bd(token, week_start, week_end, emps)
+        if r is None:
+            # Fallback al sched interno si no hay datos en BD
+            r = self.validar(sched, emps)
         self.guardar(r, token, week_start, week_end, is_post_ai)
         return r
+
+    def _validar_desde_bd(self, token, week_start, week_end, emps=None):
+        """
+        Valida leyendo los Schedules YA GUARDADOS en BD (bloques coalescidos).
+        Esto evita falsos positivos por demands granulares de 15 min.
+        """
+        if not self.cur:
+            return None
+        try:
+            self.cur.execute('''
+                SELECT s."Date", s."UserId"::text,
+                       s."WorkstationId"::text, w."Name",
+                       s."StartTime", s."EndTime"
+                FROM "Management"."Schedules" s
+                LEFT JOIN "Management"."Workstations" w ON w."Id" = s."WorkstationId"
+                WHERE COALESCE(s."IsDeleted", false) = false
+                  AND s."WorkstationId" IS NOT NULL
+                  AND s."StartTime" IS NOT NULL
+                  AND s."EndTime" IS NOT NULL
+                  AND s."Token" = %s
+                  AND s."Date" BETWEEN %s AND %s
+                ORDER BY s."Date", s."UserId", s."StartTime"
+            ''', (token, week_start, week_end))
+            rows = self.cur.fetchall() or []
+            if not rows:
+                return None
+
+            self._log(f"Validando desde BD: {len(rows)} schedules guardados")
+
+            violaciones = []
+            emp_ids, dates_seen = set(), set()
+            emp_day = defaultdict(lambda: defaultdict(list))
+            emp_names = {}
+
+            for row_date, user_id, ws_id, ws_name, start_iv, end_iv in rows:
+                d = row_date.date() if hasattr(row_date, 'date') else row_date
+                if not user_id:
+                    continue
+
+                dates_seen.add(d)
+                emp_ids.add(user_id)
+                emp_names[user_id] = user_id  # Se sobreescribirá abajo si hay emps
+
+                # Convertir interval/timedelta a minutos
+                def _iv_to_min(iv):
+                    if iv is None:
+                        return 0
+                    if hasattr(iv, 'total_seconds'):
+                        total = int(iv.total_seconds())
+                    else:
+                        total = int(iv)
+                    h = (total // 3600) % 24
+                    m = (total % 3600) // 60
+                    return h * 60 + m
+
+                si = _iv_to_min(start_iv)
+                ei = _iv_to_min(end_iv)
+                if ei <= si:
+                    ei += 24 * 60
+
+                emp_day[user_id][d].append((si, ei, ws_name or ''))
+
+            # Nombres desde emps si disponibles
+            if emps:
+                for e in emps:
+                    eid = str(getattr(e, 'id', ''))
+                    name = getattr(e, 'name', eid)
+                    if eid in emp_names:
+                        emp_names[eid] = name
+
+            # Validar reglas (misma lógica que validar() pero con datos de BD)
+            min_min = REGLAS["min_duracion_bloque_horas"] * 60
+            for eid, days in emp_day.items():
+                for d, ivs in days.items():
+                    for bs, be in self._merge(ivs):
+                        if (be - bs) < min_min:
+                            violaciones.append(Violacion(
+                                TipoViolacion.TURNO_CORTO, SeveridadViolacion.ALTA,
+                                eid, emp_names.get(eid, eid), d,
+                                f"Bloque {bs//60:02d}:{bs%60:02d}-{be//60:02d}:{be%60:02d} = {(be-bs)/60:.1f}h < 3h",
+                                (be-bs)/60, float(REGLAS["min_duracion_bloque_horas"]),
+                                bloque_inicio=f"{bs//60:02d}:{bs%60:02d}", bloque_fin=f"{be//60:02d}:{be%60:02d}"))
+
+            max_min = REGLAS["max_horas_dia"] * 60
+            for eid, days in emp_day.items():
+                for d, ivs in days.items():
+                    total = sum(be-bs for bs, be in self._merge(ivs))
+                    if total > max_min:
+                        violaciones.append(Violacion(
+                            TipoViolacion.EXCESO_HORAS_DIA, SeveridadViolacion.CRITICA,
+                            eid, emp_names.get(eid, eid), d,
+                            f"Total {total/60:.1f}h > {REGLAS['max_horas_dia']}h",
+                            total/60, float(REGLAS["max_horas_dia"])))
+
+            for eid, days in emp_day.items():
+                for d, ivs in days.items():
+                    nb = len(self._merge(ivs))
+                    if nb > REGLAS["max_bloques_dia"]:
+                        violaciones.append(Violacion(
+                            TipoViolacion.EXCESO_BLOQUES_DIA, SeveridadViolacion.MEDIA,
+                            eid, emp_names.get(eid, eid), d,
+                            f"{nb} bloques > {REGLAS['max_bloques_dia']}",
+                            float(nb), float(REGLAS["max_bloques_dia"])))
+
+            for eid, days in emp_day.items():
+                off = 7 - len(days)
+                if off < REGLAS["min_dias_descanso_semana"]:
+                    violaciones.append(Violacion(
+                        TipoViolacion.DESCANSO_INSUFICIENTE, SeveridadViolacion.CRITICA,
+                        eid, emp_names.get(eid, eid), min(days.keys()),
+                        f"{len(days)} dias, solo {off} descanso",
+                        float(off), float(REGLAS["min_dias_descanso_semana"])))
+
+            for eid, days in emp_day.items():
+                sd = sorted(days.keys())
+                for i in range(len(sd)-1):
+                    if (sd[i+1]-sd[i]).days != 1:
+                        continue
+                    b1, b2 = self._merge(days[sd[i]]), self._merge(days[sd[i+1]])
+                    if not b1 or not b2:
+                        continue
+                    rest = (24*60 - max(be for _, be in b1)) + min(bs for bs, _ in b2)
+                    if rest < REGLAS["min_descanso_entre_turnos_horas"]*60:
+                        violaciones.append(Violacion(
+                            TipoViolacion.DESCANSO_ENTRE_TURNOS, SeveridadViolacion.ALTA,
+                            eid, emp_names.get(eid, eid), sd[i],
+                            f"Solo {rest/60:.1f}h entre {sd[i]} y {sd[i+1]}",
+                            rest/60, float(REGLAS["min_descanso_entre_turnos_horas"])))
+
+            cr = sum(1 for v in violaciones if v.severidad == SeveridadViolacion.CRITICA)
+            al = sum(1 for v in violaciones if v.severidad == SeveridadViolacion.ALTA)
+            me = sum(1 for v in violaciones if v.severidad == SeveridadViolacion.MEDIA)
+            ba = sum(1 for v in violaciones if v.severidad == SeveridadViolacion.BAJA)
+
+            r = ResultadoValidacion(
+                len(violaciones), cr, al, me, ba, violaciones,
+                len(emp_ids), len(dates_seen),
+                ["2.1-MIN_3H", "2.2-MAX_BLOQUES", "2.3-MAX_HORAS", "2.3-DESCANSO_SEMANAL", "2.3-DESCANSO_ENTRE_TURNOS"],
+                cr == 0 and al == 0)
+            self._log(f"Resultado (desde BD): {r.total_violaciones} violaciones ({cr}C {al}A {me}M {ba}B) | {'VALIDO' if r.schedule_valido else 'INVALIDO'}")
+            return r
+
+        except Exception as e:
+            self._log(f"Error validando desde BD: {e}, fallback a sched interno")
+            return None

@@ -1,21 +1,24 @@
 # services/puntaje_calidad_turno.py
 """
-HU 1.2 - Puntaje de Calidad del Turno (0..100) — v4.3 (FIX cobertura real)
-=========================================================================
+HU 1.2 - Puntaje de Calidad del Turno (0..100) — v4.3.1 (FIX midnight coverage)
+=================================================================================
 
-PROBLEMA QUE CORRIGE:
-  - En algunos entornos, varios puestos aparecían con 0% de cobertura aunque sí estaban cubiertos.
-    La causa típica es que el motor de agenda trabaja con demandas normalizadas/mergeadas,
-    pero la tabla de calidad/reporting suele esperar la granularidad REAL de WorkstationDemands.
+PROBLEMA QUE CORRIGE v4.3.1:
+  - Turnos que terminan a medianoche (00:00) se guardaban en Schedules como
+    23:59 (por _end_eff / _m2t que capean 1440→1439), pero la demanda de BD
+    tiene EndTime=00:00 que se interpreta como 1440 minutos.
+    Resultado: 1439 < 1440 → cobertura = 0% aunque el turno SÍ cubre.
 
 SOLUCIÓN:
-  - Para calcular y persistir coverage POR SLOT, este servicio ahora reconstruye la lista de
-    demandas desde BD (WorkstationDemands + Workstations) para la semana (ws..we) y calcula
-    la cobertura cruzando contra el sched generado (intervalos por WorkstationId).
-  - Así, la calidad queda alineada con la estructura real de BD y los dashboards.
+  - _normalize_end_min(): Normaliza e_min al borde real de medianoche.
+    Si e_min está en [1439, 1440] lo trata como 1440 (medianoche).
+  - _covered_for_demand(): Usa tolerancia de 2 min en comparación de fin
+    para absorber el desfase 23:59 vs 00:00.
+  - Ambos: demand y schedule se normalizan antes de comparar.
 
-NOTA:
-  - No requiere cambios en el endpoint. Puedes seguir llamando calcular_y_guardar(...) igual.
+HEREDA de v4.3:
+  - Recalcula coverage desde WorkstationDemands reales + Schedules guardados.
+  - Detecta columnas reales de BD (information_schema).
 """
 
 from __future__ import annotations
@@ -40,6 +43,10 @@ DEFAULT_PARAMS = {"fairness_cv_target": 0.25, "rules_violation_cap": 20}
 # HELPERS
 # ============================================================
 
+# Tolerancia en minutos para comparación de fin de turno.
+# Absorbe la diferencia entre 23:59 (1439) y 00:00 (1440).
+MIDNIGHT_TOLERANCE_MIN = 2
+
 def _clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return lo if x < lo else hi if x > hi else x
 
@@ -61,10 +68,27 @@ def _merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
             merged.append([s, e])
     return [(a, b) for a, b in merged]
 
+
+def _normalize_end_min(e_min: int) -> int:
+    """
+    FIX v4.3.1: Normaliza el fin de intervalo al borde de medianoche.
+    
+    Problema: _end_eff convierte 00:00 → 23:59 internamente, así que un turno
+    que realmente termina a medianoche se guarda como 23:59 (1439 min).
+    Pero la demanda desde BD tiene EndTime=00:00 → 1440 min.
+    
+    Solución: Si e_min está en {1439, 1440} lo normalizamos a 1440.
+    """
+    if e_min >= 1439:
+        return 1440
+    return e_min
+
+
 def _interval_min(day: date, st: time, en: time) -> Tuple[int, int]:
     """
     Devuelve (s_min, e_min) relativo al inicio del día.
     Soporta cruces de medianoche (00:00 o fin<=ini).
+    v4.3.1: Normaliza e_min al borde de medianoche.
     """
     ini = _to_dt(day, st)
     fin = _to_dt(day, en)
@@ -72,14 +96,11 @@ def _interval_min(day: date, st: time, en: time) -> Tuple[int, int]:
         fin = _to_dt(day + timedelta(days=1), en)
     s_min = int((ini - _to_dt(day, time(0, 0))).total_seconds() // 60)
     e_min = s_min + int((fin - ini).total_seconds() // 60)
+    # FIX v4.3.1: normalizar 1439 → 1440
+    e_min = _normalize_end_min(e_min)
     return s_min, e_min
 
 def _as_time_payload(col_udt: str, t: time) -> Any:
-    """
-    Valor correcto para StartTime/EndTime según tipo real de columna:
-      - interval -> timedelta
-      - time     -> time
-    """
     if t is None:
         return timedelta(0) if col_udt == "interval" else time(0, 0)
     if col_udt == "interval":
@@ -101,10 +122,6 @@ def _table_columns(cur, schema: str, table: str) -> Dict[str, Dict[str, str]]:
     return out
 
 def _pick_template_id(cur) -> Tuple[str, str]:
-    """
-    Replica la lógica del API: 1 activa o error si múltiples activas.
-    Fallback: la primera con demandas.
-    """
     cur.execute(
         """
         SELECT "Id","Name"
@@ -136,10 +153,6 @@ def _pick_template_id(cur) -> Tuple[str, str]:
     return str(chosen[0]), str(chosen[1])
 
 def _fetch_demands_week(cur, week_start: date, template_id: str) -> List[Dict[str, Any]]:
-    """
-    Demandas EXACTAS desde BD para la semana:
-      Id, Date, WorkstationId, WorkstationName, StartTime(time), EndTime(time), EffortRequired(float)
-    """
     cur.execute(
         """
         SELECT d."Id",
@@ -173,12 +186,6 @@ def _fetch_demands_week(cur, week_start: date, template_id: str) -> List[Dict[st
     return out
 
 def _build_sched_index(sched: Dict[date, List[Tuple[Any, Any]]]) -> Dict[Tuple[date, str], Dict[str, List[Tuple[int, int]]]]:
-    """
-    Index: (date, workstation_id) -> {emp_id: [(s_min,e_min) ...]}
-
-    Importante: guardamos intervalos por empleado para poder MERGEAR y reconocer cobertura
-    aunque el empleado tenga 2+ segmentos consecutivos que juntos cubren el slot.
-    """
     idx: Dict[Tuple[date, str], Dict[str, List[Tuple[int, int]]]] = {}
     for d, pairs in (sched or {}).items():
         for emp, dm in pairs:
@@ -188,21 +195,13 @@ def _build_sched_index(sched: Dict[date, List[Tuple[Any, Any]]]) -> Dict[Tuple[d
             emp_id = str(getattr(emp, "id", emp))
             s_min, e_min = _interval_min(d, dm.start, dm.end)
             idx.setdefault((d, wsid), {}).setdefault(emp_id, []).append((s_min, e_min))
-
-    # merge por empleado
     for key, per_emp in idx.items():
         for emp_id, intervals in list(per_emp.items()):
             per_emp[emp_id] = _merge_intervals(intervals)
-
     return idx
 
 
 def _build_sched_index_from_bd(cur, token: str, ws: date, we: date) -> Dict[Tuple[date, str], Dict[str, List[Tuple[int, int]]]]:
-    """
-    Construye el índice de cobertura leyendo los Schedules YA GUARDADOS en BD.
-    Esto es más preciso que usar el sched interno porque refleja exactamente
-    lo que se guardó (después de coalescencia, filtros, trims, etc.).
-    """
     cur.execute(
         '''
         SELECT s."Date", s."UserId"::text, s."WorkstationId"::text,
@@ -226,7 +225,6 @@ def _build_sched_index_from_bd(cur, token: str, ws: date, we: date) -> Dict[Tupl
         if not user_id or not ws_id:
             continue
 
-        # Convertir interval/timedelta a time
         def _iv_to_time(iv):
             if iv is None:
                 return time(0, 0)
@@ -247,11 +245,11 @@ def _build_sched_index_from_bd(cur, token: str, ws: date, we: date) -> Dict[Tupl
 
         st = _iv_to_time(start_interval)
         en = _iv_to_time(end_interval)
+        # FIX v4.3.1: _interval_min ahora normaliza 1439→1440
         s_min, e_min = _interval_min(d, st, en)
 
         idx.setdefault((d, ws_id), {}).setdefault(user_id, []).append((s_min, e_min))
 
-    # merge por empleado
     for key, per_emp in idx.items():
         for emp_id, intervals in list(per_emp.items()):
             per_emp[emp_id] = _merge_intervals(intervals)
@@ -268,13 +266,18 @@ def _covered_for_demand(
     """
     Retorna (n_empleados_cubren, empleados_ids) para el slot [dem_s, dem_e].
 
-    Criterio: la UNIÓN de intervalos del empleado (ya mergeada) cubre completamente el slot.
+    v4.3.1 FIX: Usa tolerancia para absorber desfase 23:59 vs 00:00.
+    Tanto dem_e como emp_e ya vienen normalizados por _normalize_end_min,
+    pero por seguridad también aplicamos tolerancia en la comparación.
     """
     emps = []
     per_emp = sched_idx.get((d, wsid), {}) or {}
     for emp_id, merged in per_emp.items():
         for s, e in merged:
-            if s <= dem_s and e >= dem_e:
+            # FIX v4.3.1: tolerancia para el borde de medianoche
+            # Un empleado cubre si: su inicio <= inicio demanda
+            #                    Y: su fin + tolerancia >= fin demanda
+            if s <= dem_s and (e + MIDNIGHT_TOLERANCE_MIN) >= dem_e:
                 emps.append(emp_id)
                 break
     emps = sorted(set(emps))
@@ -401,17 +404,14 @@ class QualityResult:
     config_snapshot: Dict[str, Any]
 
 # ============================================================
-# SERVICIO PRINCIPAL  — FIX v4.3
+# SERVICIO PRINCIPAL
 # ============================================================
 
 class ScheduleQualityService:
     """
     Escribe a "Management"."ScheduleQualityShiftScores" (tabla real en BD).
 
-    FIX v4.3:
-      - recalcula coverage por slot usando WorkstationDemands reales en BD + sched,
-        evitando falsos 0% por demandas mergeadas/normalizadas.
-      - detecta columnas reales del destino (information_schema) para compatibilidad.
+    v4.3.1: Fix cobertura de turnos en borde de medianoche (23:59 vs 00:00).
     """
 
     def __init__(self, cur, table_name: str = '"Management"."ScheduleQualityShiftScores"'):
@@ -533,25 +533,20 @@ class ScheduleQualityService:
         template_id, template_name = _pick_template_id(self.cur)
         demands = _fetch_demands_week(self.cur, week_start=ws, template_id=template_id)
 
-        # Idempotencia: borrar registros previos de esta semana y token (si existen)
         try:
             self.cur.execute(
-                f'DELETE FROM {self.table_name} WHERE "{self.col_token}"=%s AND "{self.col_date}" BETWEEN %s AND %s',
-                (str(token), ws, we),
+                f'DELETE FROM {self.table_name} WHERE "{self.col_date}" BETWEEN %s AND %s',
+                (ws, we),
             )
         except Exception as _e:
-            print(f"[HU1.2] WARN: no se pudo limpiar ScheduleQualityShiftScores para token={token}: {_e}")
+            print(f"[HU1.2] WARN: no se pudo limpiar ScheduleQualityShiftScores para {ws}→{we}: {_e}")
 
-        # FIX v5.0: Usar índice desde BD (Schedules guardados) en vez del sched interno.
-        # Esto refleja exactamente lo que se guardó después de coalescencia/filtros/trims.
         sched_idx = _build_sched_index_from_bd(self.cur, token, ws, we)
         if not sched_idx:
-            # Fallback al sched interno si no hay datos en BD aún (ej: preview sin save)
             sched_idx = _build_sched_index(sched)
 
         inserted = 0
         now_dt = datetime.utcnow()
-        zero_but_has_assign = 0
 
         for dm in demands:
             d0: date = dm["date"]
@@ -581,9 +576,6 @@ class ScheduleQualityService:
                 + float(qr.rules_score) * float(w.get("rules", 0.15)),
                 0.0, 100.0,
             )
-
-            if slot_cov == 0.0 and n_emp > 0:
-                zero_but_has_assign += 1
 
             slot_metrics = {
                 "template_id": template_id,
@@ -638,14 +630,10 @@ class ScheduleQualityService:
             except Exception as e:
                 print(f'[HU1.2] Error insertando slot score (DemandId={dm["demand_id"]}): {e}')
 
-        if zero_but_has_assign:
-            print(f"[HU1.2] WARN: {zero_but_has_assign} slots quedaron con cov=0 pero n_emp>0 "
-                  f"(revisar criterio de 'cubre completo').")
-
         return inserted
 
     # ---------------------------
-    # API pública (la que ya llamas)
+    # API pública
     # ---------------------------
 
     def calcular_y_guardar(
@@ -656,20 +644,14 @@ class ScheduleQualityService:
         res: Any,
         sched: Dict[date, Any],
         emps: List[Any],
-        coverage_stats: Dict[str, Any] = None,   # compat (ignorado)
+        coverage_stats: Dict[str, Any] = None,
         is_post_ai: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Calcula y guarda scores.
-        FIX v5.0: la cobertura se recalcula desde Schedules guardados en BD
-        para reflejar exactamente lo que se guardó (coalescido, filtrado, trimmed).
-        """
         print(f"[HU1.2] Iniciando cálculo calidad. token={token} ws={ws} we={we}")
 
         template_id, _ = _pick_template_id(self.cur)
         demands = _fetch_demands_week(self.cur, week_start=ws, template_id=template_id)
 
-        # FIX v5.0: Usar índice desde BD en vez del sched interno
         sched_idx = _build_sched_index_from_bd(self.cur, token, ws, we)
         if not sched_idx:
             sched_idx = _build_sched_index(sched)
@@ -706,12 +688,7 @@ class ScheduleQualityService:
         )
 
         inserted = self.guardar_por_turno_desde_bd(
-            token=token,
-            ws=ws,
-            we=we,
-            sched=sched,
-            qr=qr,
-            is_post_ai=is_post_ai,
+            token=token, ws=ws, we=we, sched=sched, qr=qr, is_post_ai=is_post_ai,
         )
         print(f"[HU1.2] Insertados {inserted} registros por slot en BD")
 

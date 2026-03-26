@@ -579,6 +579,27 @@ class ScorerCandidatos:
         freq = (self.modelo.obs_global.get("hybrid_pair_freq", {}) or {}).get(pair_key, 0)
         return min(0.15, float(freq) * 0.02)
 
+    def _daily_hours_score(self, estado, d, max_horas_dia) -> float:
+        """
+        Penaliza empleados que ya tienen muchas horas HOY.
+        Esto fuerza distribución: si Empleado A ya tiene 4h hoy,
+        prefiere Empleado B que tiene 0h hoy.
+        
+        0h hoy → 1.0 (máxima prioridad)
+        3h hoy → 0.7
+        5h hoy → 0.4
+        7h+ hoy → 0.1
+        """
+        hoy_min = 0
+        for dd, ws, s, e in estado.asignaciones:
+            if dd == d:
+                hoy_min += (e - s)
+        hoy_h = hoy_min / 60.0
+        max_h = max(1, max_horas_dia)
+        ratio = hoy_h / max_h  # 0.0 = sin horas, 1.0 = al máximo
+        # Curva: cae rápido después de la mitad del máximo
+        return max(0.05, 1.0 - (ratio * 1.1))
+
     def score(self, emp, dm, d, estado, n_emps, prom_min_sem):
         emp_id, ws_id, dow = str(emp.id), str(dm.wsid), d.weekday()
 
@@ -598,7 +619,7 @@ class ScorerCandidatos:
         else:
             s_h = 0.5
 
-        # 3) BALANCE DE CARGA — peso dominante
+        # 3) BALANCE DE CARGA SEMANAL
         s_balance = self._balance_score(estado, prom_min_sem)
 
         # 4) Balance de días trabajados
@@ -607,12 +628,17 @@ class ScorerCandidatos:
         # 5) Déficit semanal (horas restantes vs contratadas)
         s_def = self._weekly_deficit_score(emp, estado)
 
-        # 6) Continuidad (bonus si ya trabaja hoy en el mismo ws)
+        # 6) BALANCE DIARIO — penaliza empleados con muchas horas HOY
+        max_hdia = getattr(self, '_max_horas_dia', 10)
+        s_daily = self._daily_hours_score(estado, d, max_hdia)
+
+        # 7) Continuidad (bonus REDUCIDO si ya trabaja hoy en el mismo ws)
+        # Antes era 0.8/0.4/0.2 — ahora 0.5/0.2/0.1 para no dominar
         tiene_hoy = d in estado.dias_trabajados
         mismo_ws = any(ws == ws_id for dd, ws, _, _ in estado.asignaciones if dd == d)
-        s_cont = 0.8 if mismo_ws else (0.4 if tiene_hoy else 0.2)
+        s_cont = 0.5 if mismo_ws else (0.2 if tiene_hoy else 0.1)
 
-        # 7) Día frecuente
+        # 8) Día frecuente
         s_dia = 0.3
         if pat and dow in pat.dias_frecuentes:
             idx = pat.dias_frecuentes.index(dow)
@@ -622,15 +648,16 @@ class ScorerCandidatos:
         penalty_s = self._suggestion_penalty(ws_id)
         penalty_v = self._violation_penalty(ws_id)
 
-        # ══ PESOS: BALANCE es el componente dominante (45%) ══
+        # ══ PESOS: BALANCE SEMANAL + DIARIO dominan (50%) ══
         score = (
-            0.10 * s_af +        # Afinidad histórica
-            0.05 * s_h +         # Horario típico
-            0.30 * s_balance +   # BALANCE DE CARGA (el más importante)
-            0.10 * s_days +      # Balance de días
-            0.25 * s_def +       # Déficit semanal
-            0.05 * s_cont +      # Continuidad
-            0.05 * s_dia +       # Día frecuente
+            0.08 * s_af +        # Afinidad histórica
+            0.04 * s_h +         # Horario típico
+            0.22 * s_balance +   # BALANCE DE CARGA SEMANAL
+            0.08 * s_days +      # Balance de días
+            0.20 * s_def +       # Déficit semanal
+            0.22 * s_daily +     # BALANCE DIARIO (NUEVO - evita saturar 1 persona/día)
+            0.04 * s_cont +      # Continuidad (reducido)
+            0.04 * s_dia +       # Día frecuente
             bonus_q - penalty_s - penalty_v
         )
         # Bonus extra para empleados SIN asignación (forzar distribución)
@@ -641,16 +668,12 @@ class ScorerCandidatos:
         hints = getattr(self, 'suggestion_hints', {})
         emp_name = self._emp_name_map.get(emp_id, "").upper()
         if hints and emp_name:
-            # Bonus para empleados que en la tirada anterior no tuvieron turno
             if emp_name in hints.get("emps_sin_asignacion", set()):
                 score += 0.20
-            # Bonus para empleados subutilizados
             if emp_name in hints.get("emps_subutilizados", set()):
                 score += 0.10
-            # Penalidad para empleados que estaban sobrecargados
             if emp_name in hints.get("emps_sobrecargados", set()):
                 score -= 0.15
-            # Bonus si el WS tiene gaps conocidos (priorizar cobertura)
             ws_name = getattr(dm, 'wsname', '') or ''
             ws_gaps = hints.get("ws_con_gaps", {}).get(ws_name.strip().upper(), 0)
             if ws_gaps > 0:

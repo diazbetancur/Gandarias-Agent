@@ -1237,6 +1237,8 @@ def generate_ai(week_start: date):
     generator.scorer.suggestion_hints = suggestion_hints
     # Crear mapa de nombres para que el scorer pueda buscar por nombre
     generator.scorer._emp_name_map = {str(e.id): e.name.strip().upper() for e in emps}
+    # Pasar max_horas_dia para penalización diaria
+    generator.scorer._max_horas_dia = reglas.get("max_horas_por_dia", MAX_HOURS_PER_DAY)
     sched, coverage_stats, days_off_diag = generator.generar(
         emps=emps, demands=demands, week=week,
         overrides=overrides,
@@ -1418,115 +1420,11 @@ def save():
                 except: pass
 
             # ═══════════════════════════════════════════════════════════
-            # v4.2 FLUJO MEJORADO: HU 1.1 → HU 1.2 → HU 1.3 → HU 1.6
-            # Cada paso alimenta al siguiente con sus resultados
+            # v5.0 FLUJO CORREGIDO: INSERT SCHEDULES PRIMERO, luego HUs
+            # Los servicios HU necesitan los Schedules en BD para funcionar.
             # ═══════════════════════════════════════════════════════════
 
-            explicaciones = []
-            quality_result = {}
-
-            # ═════ HU 1.1 GAPS (explicador de huecos) ═════
-            cur.execute("SAVEPOINT hu11")
-            try:
-                from services.explicador_huecos import ExplicadorHuecosService, ContextoExplicacion
-                asignaciones_por_empleado = defaultdict(list)
-                for d0 in sorted(sched.keys()):
-                    for emp0, dm0 in sched[d0]:
-                        if dm0 is None or dm0.wsid is None: continue
-                        ini0 = datetime.combine(d0, dm0.start)
-                        fin0 = datetime.combine(d0, dm0.end)
-                        if dm0.end == time(0, 0) or fin0 <= ini0:
-                            fin0 = datetime.combine(d0 + timedelta(days=1), dm0.end)
-                        asignaciones_por_empleado[emp0].append((ini0, fin0, dm0.wsid))
-                ctx = ContextoExplicacion(empleados=emps, asignaciones_por_empleado=asignaciones_por_empleado)
-                explicador = ExplicadorHuecosService(cursor=cur, debug=True)
-                explicaciones = explicador.generar_y_guardar(
-                    agenda_result=res,
-                    ctx=ctx,
-                    token=token,
-                    is_post_ai=True,
-                )
-                inserted_gaps = len(explicaciones)
-                print(f"[HU1.1] {inserted_gaps} gaps guardados en BD")
-                cur.execute("RELEASE SAVEPOINT hu11")
-            except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu11")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu11")
-                except: pass
-                print(f"[HU1.1] Error: {e}"); import traceback; traceback.print_exc()
-
-            # ═════ HU 1.2 QUALITY (puntaje por turno) ═════
-            cur.execute("SAVEPOINT hu12")
-            try:
-                from services.puntaje_calidad_turno import ScheduleQualityService
-                quality_svc = ScheduleQualityService(cur)
-                # v4.2: Pasar coverage_stats completo para guardar detalle por slot
-                quality_result = quality_svc.calcular_y_guardar(
-                    token=token, ws=ws, we=we,
-                    res={"unmet_demands": [
-                        {"required": cs["demand"].need, "covered": cs["covered"], "unmet": cs["unmet"]}
-                        for cs in coverage_stats.values()]},
-                    sched=sched, emps=emps,
-                    coverage_stats=coverage_stats,
-                    is_post_ai=True,
-                )
-                inserted_quality = quality_result.get("inserted", 0)
-                print(f"[HU1.2] Score={quality_result.get('score', 0):.2f}, {inserted_quality} registros en BD")
-                cur.execute("RELEASE SAVEPOINT hu12")
-            except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu12")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu12")
-                except: pass
-                print(f"[HU1.2] Error: {e}"); import traceback; traceback.print_exc()
-
-            # ═════ HU 1.3 SUGGESTIONS (sugerencias) ═════
-            cur.execute("SAVEPOINT hu13")
-            try:
-                from services.sugerencias_mejora import SugerenciasMejoraService
-                sug_svc = SugerenciasMejoraService(cursor=cur, debug=True)
-                # v4.2: Pasar las explicaciones COMPLETAS de HU 1.1 (no raw gaps)
-                # para que tenga categorías, razones, etc.
-                sugerencias_generadas = sug_svc.generar_y_guardar(
-                    gaps=explicaciones,  # ← AHORA recibe explicaciones completas de HU 1.1
-                    sched=sched,
-                    emps=emps,
-                    quality_result=quality_result,  # ← AHORA recibe resultado de HU 1.2
-                    token=token,
-                    week_start=ws,
-                    week_end=we,
-                    is_post_ai=True,
-                )
-                print(f"[HU1.3] {len(sugerencias_generadas)} sugerencias guardadas en BD")
-                cur.execute("RELEASE SAVEPOINT hu13")
-            except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu13")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu13")
-                except: pass
-                print(f"[HU1.3] Error: {e}"); import traceback; traceback.print_exc()
-
-            # ═════ HU 1.6 VALIDATION (validador de reglas) ═════
-            cur.execute("SAVEPOINT hu16")
-            try:
-                from services.validador_reglas import ValidadorReglasService
-                val_svc = ValidadorReglasService(cursor=cur, debug=True)
-                val_result = val_svc.validar_y_guardar(
-                    sched=sched, token=token, week_start=ws, week_end=we,
-                    emps=emps, is_post_ai=True)
-                print(f"[HU1.6] {val_result.total_violaciones} violaciones")
-                res["summary"]["hu16_violations"] = val_result.total_violaciones
-                res["summary"]["hu16_schedule_valid"] = val_result.schedule_valido
-                cur.execute("RELEASE SAVEPOINT hu16")
-            except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu16")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu16")
-                except: pass
-                print(f"[HU1.6] Error: {e}")
-
-            # ═════ INSERT SCHEDULES ═════
+# ═════ INSERT SCHEDULES ═════
             latest_end_by_wsid = res.get("latest_end_by_wsid", {})
             latest_end_by_day = res.get("latest_end_of_day", {})
             MIN_BLOCK_SAVE_MIN = MIN_SHIFT_DURATION_HOURS * 60
@@ -1641,6 +1539,118 @@ def save():
                               timedelta(hours=s_t.hour, minutes=s_t.minute),
                               timedelta(hours=e_t.hour, minutes=e_t.minute),
                               obs, False, now(), token))
+
+            
+            # ═════ AHORA LOS SERVICIOS HU (después del INSERT) ═════
+
+# ═══════════════════════════════════════════════════════════
+            # v4.2 FLUJO MEJORADO: HU 1.1 → HU 1.2 → HU 1.3 → HU 1.6
+            # Cada paso alimenta al siguiente con sus resultados
+            # ═══════════════════════════════════════════════════════════
+
+            explicaciones = []
+            quality_result = {}
+
+            # ═════ HU 1.1 GAPS (explicador de huecos) ═════
+            cur.execute("SAVEPOINT hu11")
+            try:
+                from services.explicador_huecos import ExplicadorHuecosService, ContextoExplicacion
+                asignaciones_por_empleado = defaultdict(list)
+                for d0 in sorted(sched.keys()):
+                    for emp0, dm0 in sched[d0]:
+                        if dm0 is None or dm0.wsid is None: continue
+                        ini0 = datetime.combine(d0, dm0.start)
+                        fin0 = datetime.combine(d0, dm0.end)
+                        if dm0.end == time(0, 0) or fin0 <= ini0:
+                            fin0 = datetime.combine(d0 + timedelta(days=1), dm0.end)
+                        asignaciones_por_empleado[emp0].append((ini0, fin0, dm0.wsid))
+                ctx = ContextoExplicacion(empleados=emps, asignaciones_por_empleado=asignaciones_por_empleado)
+                explicador = ExplicadorHuecosService(cursor=cur, debug=True)
+                explicaciones = explicador.generar_y_guardar(
+                    agenda_result=res,
+                    ctx=ctx,
+                    token=token,
+                    is_post_ai=True,
+                )
+                inserted_gaps = len(explicaciones)
+                print(f"[HU1.1] {inserted_gaps} gaps guardados en BD")
+                cur.execute("RELEASE SAVEPOINT hu11")
+            except Exception as e:
+                try: cur.execute("ROLLBACK TO SAVEPOINT hu11")
+                except: pass
+                try: cur.execute("RELEASE SAVEPOINT hu11")
+                except: pass
+                print(f"[HU1.1] Error: {e}"); import traceback; traceback.print_exc()
+
+            # ═════ HU 1.2 QUALITY (puntaje por turno) ═════
+            cur.execute("SAVEPOINT hu12")
+            try:
+                from services.puntaje_calidad_turno import ScheduleQualityService
+                quality_svc = ScheduleQualityService(cur)
+                # v4.2: Pasar coverage_stats completo para guardar detalle por slot
+                quality_result = quality_svc.calcular_y_guardar(
+                    token=token, ws=ws, we=we,
+                    res={"unmet_demands": [
+                        {"required": cs["demand"].need, "covered": cs["covered"], "unmet": cs["unmet"]}
+                        for cs in coverage_stats.values()]},
+                    sched=sched, emps=emps,
+                    coverage_stats=coverage_stats,
+                    is_post_ai=True,
+                )
+                inserted_quality = quality_result.get("inserted", 0)
+                print(f"[HU1.2] Score={quality_result.get('score', 0):.2f}, {inserted_quality} registros en BD")
+                cur.execute("RELEASE SAVEPOINT hu12")
+            except Exception as e:
+                try: cur.execute("ROLLBACK TO SAVEPOINT hu12")
+                except: pass
+                try: cur.execute("RELEASE SAVEPOINT hu12")
+                except: pass
+                print(f"[HU1.2] Error: {e}"); import traceback; traceback.print_exc()
+
+            # ═════ HU 1.3 SUGGESTIONS (sugerencias) ═════
+            cur.execute("SAVEPOINT hu13")
+            try:
+                from services.sugerencias_mejora import SugerenciasMejoraService
+                sug_svc = SugerenciasMejoraService(cursor=cur, debug=True)
+                # v4.2: Pasar las explicaciones COMPLETAS de HU 1.1 (no raw gaps)
+                # para que tenga categorías, razones, etc.
+                sugerencias_generadas = sug_svc.generar_y_guardar(
+                    gaps=explicaciones,  # ← AHORA recibe explicaciones completas de HU 1.1
+                    sched=sched,
+                    emps=emps,
+                    quality_result=quality_result,  # ← AHORA recibe resultado de HU 1.2
+                    token=token,
+                    week_start=ws,
+                    week_end=we,
+                    is_post_ai=True,
+                )
+                print(f"[HU1.3] {len(sugerencias_generadas)} sugerencias guardadas en BD")
+                cur.execute("RELEASE SAVEPOINT hu13")
+            except Exception as e:
+                try: cur.execute("ROLLBACK TO SAVEPOINT hu13")
+                except: pass
+                try: cur.execute("RELEASE SAVEPOINT hu13")
+                except: pass
+                print(f"[HU1.3] Error: {e}"); import traceback; traceback.print_exc()
+
+            # ═════ HU 1.6 VALIDATION (validador de reglas) ═════
+            cur.execute("SAVEPOINT hu16")
+            try:
+                from services.validador_reglas import ValidadorReglasService
+                val_svc = ValidadorReglasService(cursor=cur, debug=True)
+                val_result = val_svc.validar_y_guardar(
+                    sched=sched, token=token, week_start=ws, week_end=we,
+                    emps=emps, is_post_ai=True)
+                print(f"[HU1.6] {val_result.total_violaciones} violaciones")
+                res["summary"]["hu16_violations"] = val_result.total_violaciones
+                res["summary"]["hu16_schedule_valid"] = val_result.schedule_valido
+                cur.execute("RELEASE SAVEPOINT hu16")
+            except Exception as e:
+                try: cur.execute("ROLLBACK TO SAVEPOINT hu16")
+                except: pass
+                try: cur.execute("RELEASE SAVEPOINT hu16")
+                except: pass
+                print(f"[HU1.6] Error: {e}")
 
             # ═════ HU 1.4 POST-SAVE TRAINING (INCREMENTAL v5.0) ═════
             # Carga modelo activo existente y lo enriquece con los datos
