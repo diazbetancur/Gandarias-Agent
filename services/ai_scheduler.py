@@ -418,7 +418,21 @@ class ValidadorReglasDuras:
         for bs, be in bloques:
             if bs <= s_new and e_new <= be:
                 if (be - bs) < min_turno:
-                    return False, "BLOQUE_CORTO_PROVISIONAL"
+                    # FIX v5.1: Si el bloque resultante es < min_turno, solo rechazar
+                    # si este es el ÚNICO intervalo del bloque. Si ya había intervalos
+                    # previos y la demanda solo extiende el bloque, el bloque final
+                    # podría crecer con futuras asignaciones. Solo rechazamos si
+                    # el bloque completo (incluyendo lo nuevo) sigue siendo corto
+                    # Y no hay otros intervalos ese día que puedan mergearse.
+                    existing_day_min = sum(
+                        max(0, ie - ib)
+                        for ib, ie in estado_emp.intervalos_por_dia.get(d, [])
+                    )
+                    if existing_day_min == 0:
+                        # Primera asignación del día y el bloque es corto
+                        return False, "BLOQUE_CORTO_PROVISIONAL"
+                    # Ya tiene algo asignado hoy — el bloque corto se tolerará
+                    # porque forma parte de un turno más largo
                 break
 
         if len(bloques) >= 2:
@@ -887,6 +901,60 @@ class AIScheduleGenerator:
         # NOTA: NO se relajan reglas duras (max_horas_dia, etc.) para evitar
         # violaciones de solapamiento y restricciones. La cobertura se maximiza
         # solo con +1 día de trabajo (regla blanda según PDF sección 4.2).
+
+        # ── POST-RELAX: Revertir exceso de días si es posible ──
+        # RELAX-1 puede dejar empleados con +1 día extra. Si el empleado
+        # excede max_dias_trabajo_semana ORIGINAL, intentamos quitar su día
+        # con MENOR impacto en cobertura (preferimos quitar el día donde
+        # menos demandas dependen exclusivamente de ese empleado).
+        orig_max_dias = 7 - self.reglas.get("dias_descanso_semana", 2)
+        excess_removed = 0
+        for e in emps:
+            est = estados.get(str(e.id))
+            if not est or len(est.dias_trabajados) <= orig_max_dias:
+                continue
+            excess = len(est.dias_trabajados) - orig_max_dias
+            # Calcular impacto por día: cuántas asignaciones tiene ese día
+            # y cuántas de esas demandas quedarían sin cubrir
+            day_impact = []
+            for d_work in sorted(est.dias_trabajados):
+                assigns_on_day = [(emp2, dm2) for emp2, dm2 in sched.get(d_work, [])
+                                  if str(emp2.id) == str(e.id) and dm2.wsid is not None]
+                # Impacto = número de demandas que SOLO este empleado cubre
+                exclusive = 0
+                for emp2, dm2 in assigns_on_day:
+                    cs = coverage_stats.get(dm2.id, {})
+                    if cs.get("covered", 0) <= 1:
+                        exclusive += 1
+                day_impact.append((exclusive, len(assigns_on_day), d_work))
+            # Ordenar: quitar primero días con menor impacto exclusivo
+            day_impact.sort(key=lambda x: (x[0], x[1]))
+            for i in range(min(excess, len(day_impact))):
+                _, n_assigns, d_remove = day_impact[i]
+                if day_impact[i][0] > 0:
+                    # Tiene asignaciones exclusivas — no quitar
+                    continue
+                # Quitar todas las asignaciones de ese día
+                keep = []
+                for emp2, dm2 in sched.get(d_remove, []):
+                    if str(emp2.id) == str(e.id) and dm2.wsid is not None:
+                        s, end = _t2m(dm2.start), _end_min(dm2.end)
+                        est.desregistrar(d_remove, str(dm2.wsid), s, end)
+                        remaining[dm2.id] = remaining.get(dm2.id, 0) + 1
+                        coverage_stats[dm2.id]["covered"] = max(0, coverage_stats[dm2.id]["covered"] - 1)
+                        coverage_stats[dm2.id]["met"] = max(0, coverage_stats[dm2.id]["met"] - 1)
+                        coverage_stats[dm2.id]["unmet"] += 1
+                        excess_removed += 1
+                    else:
+                        keep.append((emp2, dm2))
+                sched[d_remove] = keep
+        if excess_removed:
+            self._log(f"[POST-RELAX] Removidos {excess_removed} slots de empleados con exceso de días")
+            # Re-fill lo removido con otros empleados
+            filled_back = self._pase_extra(emps, demands, sched, estados, coverage_stats,
+                                           remaining, overrides, prom_min * 3.0, "POST-RELAX-REFILL")
+            if filled_back:
+                self._log(f"[POST-RELAX] Re-asignados {filled_back} slots a otros empleados")
 
         for cs in coverage_stats.values():
             n = cs["demand"].need

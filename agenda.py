@@ -681,6 +681,10 @@ def load_data(week_start: date):
         normal_demands = coalesce_demands(normal_demands, tolerate_gap_min=0)
         normal_demands = normalize_by_max_need_profile(normal_demands)
 
+        # FIX v5.1: Coalescer TAMBIÉN las demandas híbridas para evitar
+        # micro-asignaciones de 15 min (ej: Felix con 16 slots de CAMARERO BARRA)
+        hybrid_demands = coalesce_demands(hybrid_demands, tolerate_gap_min=0)
+
         demands = normal_demands + hybrid_demands
         print(f"[DATA] {len(demands)} demands ({len(normal_demands)} normal + {len(hybrid_demands)} hybrid) | hybrid_pairs={len(hybrid_pairs)}")
 
@@ -890,7 +894,12 @@ def load_data(week_start: date):
                 starts_sorted = sorted(b1_starts, key=_t2m)[:2]
                 s1, s2 = starts_sorted[0], starts_sorted[1]
                 if _t2m(s2) - _t2m(s1) < GAP_MIN:
-                    end_cont = _cap_end_from_start(s1, _plus_minutes(s1, DAY_MAX_MIN))
+                    # FIX v5.1: Ventana continua desde s1. Asegurar que cubre
+                    # hasta s2 + suficiente margen para un bloque útil.
+                    # Mínimo: s1 hasta s2 + MIN_BLOCK_MIN (para cubrir demandas en s2)
+                    min_end = _plus_minutes(s2, MIN_BLOCK_MIN)
+                    max_end = _cap_end_from_start(s1, _plus_minutes(s1, DAY_MAX_MIN))
+                    end_cont = max(min_end, max_end) if _t2m(min_end) > _t2m(max_end) else max_end
                     if _t2m(end_cont) - _t2m(s1) < MIN_BLOCK_MIN:
                         end_cont = _plus_minutes(s1, MIN_BLOCK_MIN)
                     windows.append((s1, end_cont))
