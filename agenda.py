@@ -10,6 +10,7 @@ MEJORAS v5.0:
     Ej: demanda 1.5 = 1 persona normal + 1 persona híbrida.
   - Post-save training incremental: merge modelo previo + datos nuevos.
 """
+
 import logging
 import os
 import uuid
@@ -23,10 +24,19 @@ from flask_cors import CORS
 from psycopg2 import DataError, OperationalError, ProgrammingError
 
 from services.ai_scheduler import (
-    AIScheduleGenerator, ExtractorPatrones, ModeloPatrones,
-    _t2m, _m2t, _end_eff, _seg_min, _merge_intervals, _has_overlap, _uid,
+    AIScheduleGenerator,
+    ExtractorPatrones,
+    ModeloPatrones,
+    _t2m,
+    _m2t,
+    _end_eff,
+    _seg_min,
+    _merge_intervals,
+    _has_overlap,
+    _uid,
     REGLAS_DURAS_DEFAULTS,
 )
+from services.skill_coverage_analyzer import SkillCoverageAnalyzer
 
 # ───────── CONFIG ─────────
 ASCII_LOGS = True
@@ -60,23 +70,38 @@ app = Flask(__name__)
 CORS(app)
 
 DB = {
-    "host": "database-gandarias-restore.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com",
-    "port": 5432, "dbname": "postgresqa",
-    "user": "postgres", "password": "MyStrongPassword!123_",
+    "host": "database-gandarias.ct6gmyi80fdr.eu-central-1.rds.amazonaws.com",
+    "port": 5432,
+    "dbname": "postgres",
+    "user": "postgres",
+    "password": "MyStrongPassword!123_",
 }
 
-def uid(): return str(uuid.uuid4())
-def now(): return datetime.now(timezone.utc)
+
+def uid():
+    return str(uuid.uuid4())
+
+
+def now():
+    return datetime.now(timezone.utc)
+
 
 class DatabaseConnectionError(Exception): ...
+
+
 class DataNotFoundError(Exception): ...
+
+
 class DataIntegrityError(Exception): ...
+
+
 class ScheduleGenerationError(Exception): ...
 
 
 # ═══════════════════════════════════════════════════════════════════
 # MODELS
 # ═══════════════════════════════════════════════════════════════════
+
 
 class Emp:
     def __init__(self, row: Tuple):
@@ -117,11 +142,11 @@ class Emp:
     def weekly_hours_limit(self):
         """
         Límite semanal duro (MINUTOS):
-        
+
         STRICT_HOURS_MODE = True:
           - ComplementHours=True  -> cap = MAX_HOURS_PER_WEEK (ley)
           - ComplementHours=False -> cap = min(HiredHours, MAX_HOURS_PER_WEEK)
-        
+
         STRICT_HOURS_MODE = False:
           - cap = max(HiredHours, MAX_HOURS_PER_WEEK)
           - Ocupa toda la capacidad posible: si tiene 25h + complementarias,
@@ -165,10 +190,12 @@ class Emp:
             if s >= a and end <= b2:
                 return True
         return False
+
+
 class Demand:
     def __init__(self, row: Tuple):
-        (self.id, rdate, self.wsid, self.wsname, self.start, self.end, need) = row
-        self.date = rdate.date() if hasattr(rdate, 'date') else rdate
+        self.id, rdate, self.wsid, self.wsname, self.start, self.end, need = row
+        self.date = rdate.date() if hasattr(rdate, "date") else rdate
         try:
             self.raw_need = float(need) if need is not None else 0.0
         except (TypeError, ValueError):
@@ -195,9 +222,11 @@ class Demand:
         self.hybrid_partner_wsid = None
 
     def __repr__(self):
-        return (f"Demand(id={self.id}, date={self.date}, ws={self.wsname}, "
-                f"{self.start}-{self.end}, raw={self.raw_need}, need={self.need}, "
-                f"hyb_comp={self.has_hybrid_component})")
+        return (
+            f"Demand(id={self.id}, date={self.date}, ws={self.wsname}, "
+            f"{self.start}-{self.end}, raw={self.raw_need}, need={self.need}, "
+            f"hyb_comp={self.has_hybrid_component})"
+        )
 
 
 class HybridDemandGroup:
@@ -228,14 +257,18 @@ class HybridDemandGroup:
 # BD HELPERS
 # ═══════════════════════════════════════════════════════════════════
 
+
 def conn():
     try:
         return psycopg2.connect(**DB)
     except OperationalError as e:
         t = str(e)
-        if "could not connect" in t: raise DatabaseConnectionError("No se puede conectar a BD")
-        if "authentication failed" in t: raise DatabaseConnectionError("Credenciales BD incorrectas")
+        if "could not connect" in t:
+            raise DatabaseConnectionError("No se puede conectar a BD")
+        if "authentication failed" in t:
+            raise DatabaseConnectionError("Credenciales BD incorrectas")
         raise DatabaseConnectionError(t)
+
 
 def fetchall(cur, sql, pars=None):
     try:
@@ -244,8 +277,10 @@ def fetchall(cur, sql, pars=None):
     except (ProgrammingError, DataError) as e:
         raise DataIntegrityError(str(e))
 
+
 def monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
+
 
 def duration_min(dm) -> int:
     return _seg_min(dm.start, dm.end)
@@ -255,42 +290,55 @@ def duration_min(dm) -> int:
 # DEMAND PROCESSING
 # ═══════════════════════════════════════════════════════════════════
 
+
 def split_long_segment(d, wsid, wsname, s_min, e_min, need, max_hours, raw_need=None):
     out, limit, cur = [], max_hours * 60, s_min
     eff = need if raw_need is None else raw_need
     while cur < e_min:
         nxt = min(cur + limit, e_min)
-        out.append(Demand((uid(), d, wsid, wsname, _m2t(cur),
-                           _m2t(nxt if nxt < 1440 else 0), eff)))
+        out.append(Demand((uid(), d, wsid, wsname, _m2t(cur), _m2t(nxt if nxt < 1440 else 0), eff)))
         cur = nxt
     return out
 
+
 def coalesce_demands(demands, tolerate_gap_min=0):
     by_key = defaultdict(list)
-    for d in demands: by_key[(d.date, d.wsid, d.wsname)].append(d)
+    for d in demands:
+        by_key[(d.date, d.wsid, d.wsname)].append(d)
     merged = []
     for (dte, wsid, wsname), items in by_key.items():
         items.sort(key=lambda x: (_t2m(x.start), _t2m(x.end)))
-        if not items: continue
+        if not items:
+            continue
         curr = items[0]
         for nxt in items[1:]:
             c_end, n_start = _t2m(_end_eff(curr.end)), _t2m(nxt.start)
             if n_start <= c_end + tolerate_gap_min and nxt.need == curr.need:
                 curr = Demand((curr.id, dte, wsid, wsname, curr.start, nxt.end, curr.raw_need))
             else:
-                merged.append(curr); curr = nxt
+                merged.append(curr)
+                curr = nxt
         merged.append(curr)
     return merged
+
 
 def normalize_by_max_need_profile(demands):
     result = []
     for dm in demands:
         dur_min = _seg_min(dm.start, dm.end)
         if dur_min > MAX_HOURS_PER_DAY * 60 and dm.need > 0:
-            result.extend(split_long_segment(
-                dm.date, dm.wsid, dm.wsname,
-                _t2m(dm.start), _t2m(_end_eff(dm.end)),
-                dm.need, MAX_HOURS_PER_DAY, dm.raw_need))
+            result.extend(
+                split_long_segment(
+                    dm.date,
+                    dm.wsid,
+                    dm.wsname,
+                    _t2m(dm.start),
+                    _t2m(_end_eff(dm.end)),
+                    dm.need,
+                    MAX_HOURS_PER_DAY,
+                    dm.raw_need,
+                )
+            )
         else:
             result.append(dm)
     return result
@@ -301,28 +349,34 @@ def normalize_by_max_need_profile(demands):
 # ═══════════════════════════════════════════════════════════════════
 
 LAW_IDS = {
-    "max_hours_per_day":        "feedc36b-debf-4f51-b882-194c3816c4d1",
-    "min_hours_between_split":  "1b52f06b-64d9-40a0-bcf5-c922cfc937c2",
+    "max_hours_per_day": "feedc36b-debf-4f51-b882-194c3816c4d1",
+    "min_hours_between_split": "1b52f06b-64d9-40a0-bcf5-c922cfc937c2",
     "min_shift_duration_hours": "df056d24-7d3a-416a-949f-3f0b491515e4",
     "min_hours_between_shifts": "be491f3f-059b-42ed-adc4-331754d85412",
-    "min_days_off_per_week":    "756d9660-5101-4673-892b-267b38dc805e",
-    "max_hours_per_week":       "05ab8c40-f06c-47d9-b9ed-4462ab64f3f2",
+    "min_days_off_per_week": "756d9660-5101-4673-892b-267b38dc805e",
+    "max_hours_per_week": "05ab8c40-f06c-47d9-b9ed-4462ab64f3f2",
 }
+
 
 def fetch_law_restrictions_by_id(ids=None):
     ids = ids or LAW_IDS
     id_list = list(ids.values())
     resolved = {k: None for k in ids}
     with conn() as c, c.cursor() as cur:
-        rows = fetchall(cur, '''
+        rows = fetchall(
+            cur,
+            """
             SELECT "Id"::text, "Description", "CantHours"
             FROM "Management"."LawRestrictions"
             WHERE "Id" = ANY(%s::uuid[])
-        ''', (id_list,))
+        """,
+            (id_list,),
+        )
     by_id = {r[0]: {"description": r[1], "hours": int(r[2]) if r[2] is not None else None} for r in rows}
     for k, u in ids.items():
         info = by_id.get(u)
-        if info: resolved[k] = info["hours"]
+        if info:
+            resolved[k] = info["hours"]
     return {"resolved": resolved}
 
 
@@ -330,27 +384,45 @@ def fetch_law_restrictions_by_id(ids=None):
 # TEMPLATE
 # ═══════════════════════════════════════════════════════════════════
 
+
 def pick_template(cur, week_start, week_end):
-    act = fetchall(cur, '''SELECT "Id","Name" FROM "Management"."WorkstationDemandTemplates" WHERE "IsActive" = TRUE''')
-    if len(act) == 1: return act[0]
-    if len(act) > 1: raise DataIntegrityError("Hay varias plantillas activas")
-    rows = fetchall(cur, '''
-        SELECT "Id","Name","StartDate"::date,"EndDate"::date,
-               COALESCE("DateCreated", '-infinity'::timestamptz) AS created,
-               (SELECT COUNT(*) FROM "Management"."WorkstationDemands" d WHERE d."TemplateId" = t."Id") AS demandas
+    # 1. Exactamente 1 activa → usar esa
+    act = fetchall(cur, """SELECT "Id","Name" FROM "Management"."WorkstationDemandTemplates" WHERE "IsActive" = TRUE""")
+    if len(act) == 1:
+        return act[0]
+    if len(act) > 1:
+        raise DataIntegrityError("Hay varias plantillas activas")
+
+    # 2. Sin plantilla activa → buscar la que mejor encaja con la semana pedida:
+    #    prioridad 1: días de solapamiento con week_start..week_end (descendente)
+    #    prioridad 2: más reciente (DateCreated)
+    rows = fetchall(
+        cur,
+        """
+        SELECT "Id","Name"
         FROM "Management"."WorkstationDemandTemplates" t
-        WHERE "StartDate" IS NOT NULL AND "EndDate" IS NOT NULL
-        ORDER BY "StartDate","EndDate","Id"
-    ''')
-    if not rows: raise DataNotFoundError("No existen plantillas con demandas")
-    chosen = next((r for r in rows if int(r[5] or 0) > 0), None)
-    if chosen: return (chosen[0], chosen[1])
-    raise DataNotFoundError("No hay plantilla con demandas > 0")
+        WHERE (SELECT COUNT(*) FROM "Management"."WorkstationDemands" d
+               WHERE d."TemplateId" = t."Id") > 0
+        ORDER BY
+            CASE WHEN "StartDate" IS NOT NULL AND "EndDate" IS NOT NULL
+                      AND "StartDate"::date <= %s AND "EndDate"::date >= %s
+                 THEN (LEAST("EndDate"::date, %s) - GREATEST("StartDate"::date, %s))
+                 ELSE -1
+            END DESC,
+            COALESCE("DateCreated", '-infinity'::timestamptz) DESC
+        LIMIT 1
+        """,
+        (week_end, week_start, week_end, week_start),
+    )
+    if not rows:
+        raise DataNotFoundError("No hay plantilla con demandas > 0")
+    return (rows[0][0], rows[0][1])
 
 
 # ═══════════════════════════════════════════════════════════════════
 # USERSHIFT DAY MODES (portado del viejo agenda.py)
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _usershift_day_eligibility(emp, ddate):
     """
@@ -358,8 +430,7 @@ def _usershift_day_eligibility(emp, ddate):
     Returns: (ok, kind, reason)
     """
     dow = ddate.weekday()
-    wins = sorted(emp.user_shift_windows.get(dow, []),
-                  key=lambda w: (_t2m(w[0]), _t2m(w[1])))
+    wins = sorted(emp.user_shift_windows.get(dow, []), key=lambda w: (_t2m(w[0]), _t2m(w[1])))
     if not wins:
         return False, None, "no_usershift_for_day"
     # Merge solapados
@@ -385,11 +456,15 @@ def _minutes_candidate_in_usershift(emp, ddate, demands):
     """Minutos de demanda dentro de ventanas UserShift del día."""
     dow = ddate.weekday()
     wins = emp.user_shift_windows.get(dow)
-    if not wins: return 0, "no_usershift_for_day"
-    total = 0; any_inside = False
+    if not wins:
+        return 0, "no_usershift_for_day"
+    total = 0
+    any_inside = False
     for dm in demands:
-        if dm.date != ddate: continue
-        if not emp.can(dm.wsid): continue
+        if dm.date != ddate:
+            continue
+        if not emp.can(dm.wsid):
+            continue
         end = dm.end if dm.end != time(0, 0) else time(23, 59)
         for w_s, w_e in wins:
             w_end = w_e if w_e != time(0, 0) else time(23, 59)
@@ -397,8 +472,10 @@ def _minutes_candidate_in_usershift(emp, ddate, demands):
                 any_inside = True
                 total += duration_min(dm)
                 break
-    if not any_inside: return 0, "no_demands_inside_window"
-    if total < MIN_SHIFT_DURATION_HOURS * 60: return total, "insufficient_volume_for_3h"
+    if not any_inside:
+        return 0, "no_demands_inside_window"
+    if total < MIN_SHIFT_DURATION_HOURS * 60:
+        return total, "insufficient_volume_for_3h"
     return total, "ok"
 
 
@@ -411,7 +488,8 @@ def plan_usershift_day_modes(emps, demands, week):
     overrides = set()
     plan = {}
     by_date = defaultdict(list)
-    for dm in demands: by_date[dm.date].append(dm)
+    for dm in demands:
+        by_date[dm.date].append(dm)
 
     for emp in emps:
         for d in week:
@@ -439,14 +517,18 @@ def plan_usershift_day_modes(emps, demands, week):
 # HYBRID 0.5 POSTPROCESS (portado del viejo agenda.py)
 # ═══════════════════════════════════════════════════════════════════
 
+
 def fetch_hybrid_pairs(cur):
     pairs = {}
     ws_to_partners = defaultdict(set)
-    rows = fetchall(cur, '''
+    rows = fetchall(
+        cur,
+        """
         SELECT "Id", "WorkstationAId", "WorkstationBId", "WorkstationCId", "WorkstationDId", COALESCE("Description", '')
         FROM "Management"."HybridWorkstations"
         WHERE COALESCE("IsDeleted", false) = false
-    ''')
+    """,
+    )
     for hid, a, b, c, d, desc in rows:
         for x, y in ((a, b), (c, d)):
             if not x or not y:
@@ -480,9 +562,11 @@ def build_hybrid_groups(demands, hybrid_pairs):
     dates = sorted({dm.date for dm in demands if getattr(dm, "has_hybrid_component", False)})
 
     for day in dates:
-        ws_present = sorted({str(dm.wsid) for dm in demands if getattr(dm, "has_hybrid_component", False) and dm.date == day})
+        ws_present = sorted(
+            {str(dm.wsid) for dm in demands if getattr(dm, "has_hybrid_component", False) and dm.date == day}
+        )
         for i, ws_a in enumerate(ws_present):
-            for ws_b in ws_present[i + 1:]:
+            for ws_b in ws_present[i + 1 :]:
                 pair_key = frozenset({ws_a, ws_b})
                 meta = hybrid_pairs.get(pair_key)
                 if not meta:
@@ -543,7 +627,10 @@ def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, over
 
     inserted = 0
     for grp in build_hybrid_groups(demands, hybrid_pairs):
-        if coverage_stats.get(grp.dm_a.id, {}).get("unmet", 0) <= 0 and coverage_stats.get(grp.dm_b.id, {}).get("unmet", 0) <= 0:
+        if (
+            coverage_stats.get(grp.dm_a.id, {}).get("unmet", 0) <= 0
+            and coverage_stats.get(grp.dm_b.id, {}).get("unmet", 0) <= 0
+        ):
             continue
         best = None
         best_score = -1.0
@@ -565,7 +652,9 @@ def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, over
         grp.dm_b.observation_override = "BT"
         sched[grp.date].append((best, grp.dm_a))
         sched[grp.date].append((best, grp.dm_b))
-        estados[str(best.id)].registrar(grp.date, f"HYB:{grp.wsid_a}|{grp.wsid_b}", _t2m(grp.start), _t2m(_end_eff(grp.end)))
+        estados[str(best.id)].registrar(
+            grp.date, f"HYB:{grp.wsid_a}|{grp.wsid_b}", _t2m(grp.start), _t2m(_end_eff(grp.end))
+        )
         for dm in (grp.dm_a, grp.dm_b):
             if dm.id in coverage_stats and coverage_stats[dm.id]["unmet"] > 0:
                 coverage_stats[dm.id]["covered"] += 1
@@ -581,20 +670,27 @@ def apply_hybrid_05_postprocess(emps, demands, week, sched, coverage_stats, over
 # LOAD DATA (CORREGIDO: ComplementHours, IsActive AND NOT IsDelete)
 # ═══════════════════════════════════════════════════════════════════
 
+
 def load_data(week_start: date):
     week = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week[-1]
 
     def _to_time(x):
-        if x is None: return None
-        if isinstance(x, time): return x
-        if isinstance(x, timedelta): return (datetime.min + x).time()
-        try: return (datetime.min + x).time()
-        except: return None
+        if x is None:
+            return None
+        if isinstance(x, time):
+            return x
+        if isinstance(x, timedelta):
+            return (datetime.min + x).time()
+        try:
+            return (datetime.min + x).time()
+        except:
+            return None
 
     def _pair(s, e):
         s, e = _to_time(s), _to_time(e)
-        if not s or not e: return None
+        if not s or not e:
+            return None
         e = e if e != time(0, 0) else time(23, 59)
         return (s, e) if s < e else None
 
@@ -603,15 +699,20 @@ def load_data(week_start: date):
         ivs = sorted([p for p in blocks if p], key=lambda p: (p[0], p[1]))
         merged = []
         for s, e in ivs:
-            if not merged: merged.append([s, e])
+            if not merged:
+                merged.append([s, e])
             else:
-                if s <= merged[-1][1]: merged[-1][1] = max(merged[-1][1], e)
-                else: merged.append([s, e])
+                if s <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], e)
+                else:
+                    merged.append([s, e])
         out, cur_t = [], DAY_START
         for s, e in merged:
-            if cur_t < s: out.append((cur_t, s))
+            if cur_t < s:
+                out.append((cur_t, s))
             cur_t = max(cur_t, e)
-        if cur_t < DAY_END: out.append((cur_t, DAY_END))
+        if cur_t < DAY_END:
+            out.append((cur_t, DAY_END))
         return out
 
     with conn() as c, c.cursor() as cur:
@@ -631,9 +732,11 @@ def load_data(week_start: date):
         MAX_HOURS_PER_WEEK = int(L.get("max_hours_per_week") or 38)
 
         if ASCII_LOGS:
-            print(f"[LAW] MAX_H={MAX_HOURS_PER_DAY}h MIN_SHIFT={MIN_SHIFT_DURATION_HOURS}h "
-                  f"MIN_SPLIT={MIN_HOURS_BETWEEN_SPLIT}h MIN_REST={MIN_HOURS_BETWEEN_SHIFTS}h "
-                  f"MIN_OFF={MIN_DAYS_OFF}")
+            print(
+                f"[LAW] MAX_H={MAX_HOURS_PER_DAY}h MIN_SHIFT={MIN_SHIFT_DURATION_HOURS}h "
+                f"MIN_SPLIT={MIN_HOURS_BETWEEN_SPLIT}h MIN_REST={MIN_HOURS_BETWEEN_SHIFTS}h "
+                f"MIN_OFF={MIN_DAYS_OFF}"
+            )
 
         # Template
         tpl_id, tpl_name = pick_template(cur, week_start, week_end)
@@ -641,7 +744,10 @@ def load_data(week_start: date):
 
         # Demands
         raw_demands = [
-            Demand(r) for r in fetchall(cur, '''
+            Demand(r)
+            for r in fetchall(
+                cur,
+                """
                 SELECT d."Id", %s + d."Day"*interval '1 day',
                        d."WorkstationId", w."Name",
                        (TIMESTAMP '2000-01-01'+d."StartTime")::time,
@@ -651,7 +757,9 @@ def load_data(week_start: date):
                 JOIN "Management"."Workstations" w ON w."Id" = d."WorkstationId"
                 WHERE d."TemplateId" = %s
                 ORDER BY d."Day", d."StartTime", d."EndTime", d."Id"
-            ''', (week_start, tpl_id))
+            """,
+                (week_start, tpl_id),
+            )
         ]
         hybrid_pairs, hybrid_partner_map = fetch_hybrid_pairs(cur)
 
@@ -686,11 +794,16 @@ def load_data(week_start: date):
         hybrid_demands = coalesce_demands(hybrid_demands, tolerate_gap_min=0)
 
         demands = normal_demands + hybrid_demands
-        print(f"[DATA] {len(demands)} demands ({len(normal_demands)} normal + {len(hybrid_demands)} hybrid) | hybrid_pairs={len(hybrid_pairs)}")
+        print(
+            f"[DATA] {len(demands)} demands ({len(normal_demands)} normal + {len(hybrid_demands)} hybrid) | hybrid_pairs={len(hybrid_pairs)}"
+        )
 
         # ── EMPLEADOS (CORREGIDO: ComplementHours, no IsSplitShift) ──
         emps_map = {
-            r[0]: Emp(r) for r in fetchall(cur, '''
+            r[0]: Emp(r)
+            for r in fetchall(
+                cur,
+                """
                 SELECT "Id",
                        COALESCE("FirstName",'')||' '||COALESCE("LastName",'') AS name,
                        COALESCE("ComplementHours", TRUE),
@@ -702,120 +815,173 @@ def load_data(week_start: date):
                 FROM "Management"."AspNetUsers"
                 WHERE "IsActive" AND NOT "IsDelete"
                 ORDER BY "LastName","FirstName","Id"
-            ''')
+            """,
+            )
         }
-        if not emps_map: raise DataNotFoundError("No hay empleados activos")
+        if not emps_map:
+            raise DataNotFoundError("No hay empleados activos")
 
         # Roles
-        for uid2, ws in fetchall(cur, '''
+        for uid2, ws in fetchall(
+            cur,
+            """
             SELECT "UserId","WorkstationId" FROM "Management"."UserWorkstations"
             WHERE NOT "IsDelete" ORDER BY "UserId","WorkstationId"
-        '''):
-            if uid2 in emps_map: emps_map[uid2].roles.add(ws)
+        """,
+        ):
+            if uid2 in emps_map:
+                emps_map[uid2].roles.add(ws)
 
         emps = [emps_map[k] for k in sorted(emps_map.keys())]
 
         # Role fallbacks
         name2id = {}
-        for _dm in demands: name2id[_dm.wsname.upper()] = _dm.wsid
+        for _dm in demands:
+            name2id[_dm.wsname.upper()] = _dm.wsid
         for _e in emps:
             _e.roles_originales = set(_e.roles)
             for _r in list(_e.roles):
-                for _t in ROLE_FALLBACKS_BY_NAME.get(
-                    next((n for n, i in name2id.items() if i == _r), ""), []):
+                for _t in ROLE_FALLBACKS_BY_NAME.get(next((n for n, i in name2id.items() if i == _r), ""), []):
                     tid = name2id.get(_t.upper())
-                    if tid: _e.roles.add(tid)
+                    if tid:
+                        _e.roles.add(tid)
 
         # Ausentismos
-        for uid_abs, sd, ed in fetchall(cur, '''
+        for uid_abs, sd, ed in fetchall(
+            cur,
+            """
             SELECT "UserId", "StartDate"::date, COALESCE("EndDate"::date, %s)
             FROM "Management"."UserAbsenteeisms"
             WHERE "StartDate"::date <= %s AND COALESCE("EndDate"::date, %s) >= %s
             ORDER BY "UserId","StartDate","EndDate"
-        ''', (week_end, week_end, week_end, week_start)):
-            if uid_abs not in emps_map: continue
+        """,
+            (week_end, week_end, week_end, week_start),
+        ):
+            if uid_abs not in emps_map:
+                continue
             emp = emps_map[uid_abs]
             d0 = max(sd, week_start)
             while d0 <= ed:
-                emp.absent.add(d0); emp.abs_reason[d0] = 'ABS'; emp.exc[d0] = []
+                emp.absent.add(d0)
+                emp.abs_reason[d0] = "ABS"
+                emp.exc[d0] = []
                 d0 += timedelta(days=1)
 
         # Restricciones semanales
-        for uid3, dow, rt, f1, t1, b1s, b1e, b2s, b2e in fetchall(cur, '''
+        for uid3, dow, rt, f1, t1, b1s, b1e, b2s, b2e in fetchall(
+            cur,
+            """
             SELECT "UserId","DayOfWeek","RestrictionType",
                    "AvailableFrom","AvailableUntil",
                    "Block1Start","Block1End","Block2Start","Block2End"
             FROM "Management"."EmployeeScheduleRestrictions"
             ORDER BY "UserId","DayOfWeek","RestrictionType"
-        '''):
-            if uid3 not in emps_map: continue
+        """,
+        ):
+            if uid3 not in emps_map:
+                continue
             emp = emps_map[uid3]
-            if rt == 0: emp.day_off.add(dow); continue
-            if rt == 1: emp.window[dow].append((time(0, 0), time(23, 59))); continue
+            if rt == 0:
+                emp.day_off.add(dow)
+                continue
+            if rt == 1:
+                emp.window[dow].append((time(0, 0), time(23, 59)))
+                continue
             if rt == 2:
-                s = _to_time(f1); e = _to_time(t1)
-                if s is None and e is None: continue
-                if s is not None and e is None: e = time(23, 59)
-                if s is None: s = time(0, 0)
-                if e == time(0, 0): e = time(23, 59)
-                if s < e: emp.window[dow].append((s, e))
+                s = _to_time(f1)
+                e = _to_time(t1)
+                if s is None and e is None:
+                    continue
+                if s is not None and e is None:
+                    e = time(23, 59)
+                if s is None:
+                    s = time(0, 0)
+                if e == time(0, 0):
+                    e = time(23, 59)
+                if s < e:
+                    emp.window[dow].append((s, e))
                 continue
             if rt == 3:
                 t = _to_time(t1)
-                if t: emp.window[dow].append((time(0, 0), t if t != time(0, 0) else time(23, 59)))
+                if t:
+                    emp.window[dow].append((time(0, 0), t if t != time(0, 0) else time(23, 59)))
                 continue
             if rt == 4:
-                p1 = _pair(b1s, b1e); p2 = _pair(b2s, b2e)
-                if p1: emp.window[dow].append(p1)
-                if p2: emp.window[dow].append(p2)
+                p1 = _pair(b1s, b1e)
+                p2 = _pair(b2s, b2e)
+                if p1:
+                    emp.window[dow].append(p1)
+                if p2:
+                    emp.window[dow].append(p2)
                 if not p1 and not p2:
                     p = _pair(f1, t1)
-                    if p: emp.window[dow].append(p)
+                    if p:
+                        emp.window[dow].append(p)
                 continue
             if rt == 5:
                 blocked = []
-                p1 = _pair(b1s, b1e); p2 = _pair(b2s, b2e)
-                if p1: blocked.append(p1)
-                if p2: blocked.append(p2)
+                p1 = _pair(b1s, b1e)
+                p2 = _pair(b2s, b2e)
+                if p1:
+                    blocked.append(p1)
+                if p2:
+                    blocked.append(p2)
                 if not blocked:
                     p = _pair(f1, t1)
-                    if p: blocked.append(p)
-                for w in _complement_blocks(blocked): emp.window[dow].append(w)
+                    if p:
+                        blocked.append(p)
+                for w in _complement_blocks(blocked):
+                    emp.window[dow].append(w)
 
         # Excepciones
-        for uid4, d_exc, rt, f, t in fetchall(cur, '''
+        for uid4, d_exc, rt, f, t in fetchall(
+            cur,
+            """
             SELECT "UserId","Date","RestrictionType","AvailableFrom","AvailableUntil"
             FROM "Management"."EmployeeScheduleExceptions"
             WHERE "Date" BETWEEN %s AND %s ORDER BY "UserId","Date","RestrictionType"
-        ''', (week_start, week_end)):
-            if uid4 not in emps_map: continue
+        """,
+            (week_start, week_end),
+        ):
+            if uid4 not in emps_map:
+                continue
             emp = emps_map[uid4]
             if rt == 0:
                 emp.absent.add(d_exc)
-                emp.abs_reason[d_exc] = 'ABS'
+                emp.abs_reason[d_exc] = "ABS"
             else:
-                s = _to_time(f); e = _to_time(t)
+                s = _to_time(f)
+                e = _to_time(t)
                 if s and e and s < e:
-                    if e == time(0, 0): e = time(23, 59)
+                    if e == time(0, 0):
+                        e = time(23, 59)
                     emp.exc[d_exc].append((s, e))
 
         # Licencias
-        for uid5, sd, ed in fetchall(cur, '''
+        for uid5, sd, ed in fetchall(
+            cur,
+            """
             SELECT "UserId","StartDate"::date, COALESCE("EndDate"::date,%s)
             FROM "Management"."Licenses"
             WHERE "StartDate"::date <= %s AND COALESCE("EndDate"::date,%s) >= %s
             ORDER BY "UserId","StartDate","EndDate"
-        ''', (week_end, week_end, week_end, week_start)):
-            if uid5 not in emps_map: continue
+        """,
+            (week_end, week_end, week_end, week_start),
+        ):
+            if uid5 not in emps_map:
+                continue
             emp = emps_map[uid5]
             d0 = max(sd, week_start)
             while d0 <= ed:
-                emp.absent.add(d0); emp.abs_reason[d0] = 'ABS'
+                emp.absent.add(d0)
+                emp.abs_reason[d0] = "ABS"
                 d0 += timedelta(days=1)
 
         # ShiftTypes
         shift_types = []
-        for row in fetchall(cur, '''
+        for row in fetchall(
+            cur,
+            """
             SELECT "Id","Name","Description",
                    (TIMESTAMP '2000-01-01' + "Block1Start")::time,
                    (TIMESTAMP '2000-01-01' + "Block1lastStart")::time,
@@ -824,33 +990,48 @@ def load_data(week_start: date):
                    (TIMESTAMP '2000-01-01' + COALESCE("Block2lastStart", INTERVAL '00:00:00'))::time,
                    "IsActive"
             FROM "Management"."ShiftTypes" WHERE "IsActive" = TRUE ORDER BY "Name","Id"
-        '''):
-            shift_types.append({
-                'id': row[0], 'name': row[1], 'description': row[2],
-                'start_time': row[3], 'end_time': row[4], 'is_split': row[5],
-                'b2_start': row[6], 'b2_end': row[7], 'is_active': row[8],
-            })
-        shift_types_by_id = {st['id']: st for st in shift_types}
+        """,
+        ):
+            shift_types.append(
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "start_time": row[3],
+                    "end_time": row[4],
+                    "is_split": row[5],
+                    "b2_start": row[6],
+                    "b2_end": row[7],
+                    "is_active": row[8],
+                }
+            )
+        shift_types_by_id = {st["id"]: st for st in shift_types}
 
         # ShiftType restrictions
-        for uidX, dowX, stid in fetchall(cur, '''
+        for uidX, dowX, stid in fetchall(
+            cur,
+            """
             SELECT "UserId","DayOfWeek","ShiftTypeId"
             FROM "Management"."EmployeeShiftTypeRestrictions"
             ORDER BY "UserId","DayOfWeek","ShiftTypeId"
-        '''):
-            if uidX not in emps_map or stid not in shift_types_by_id: continue
-            emp = emps_map[uidX]; st = shift_types_by_id[stid]
+        """,
+        ):
+            if uidX not in emps_map or stid not in shift_types_by_id:
+                continue
+            emp = emps_map[uidX]
+            st = shift_types_by_id[stid]
             emp.shift_type_restr_by_dow[dowX].add(stid)
             _cap = lambda t: t if t != time(0, 0) else time(23, 59)
-            if st['start_time'] and st['end_time'] and st['start_time'] < _cap(st['end_time']):
-                emp.shift_type_windows[dowX].append((st['start_time'], _cap(st['end_time'])))
-            if st['is_split'] and st.get('b2_start') and st.get('b2_end') and st['b2_start'] < _cap(st['b2_end']):
-                emp.shift_type_windows[dowX].append((st['b2_start'], _cap(st['b2_end'])))
+            if st["start_time"] and st["end_time"] and st["start_time"] < _cap(st["end_time"]):
+                emp.shift_type_windows[dowX].append((st["start_time"], _cap(st["end_time"])))
+            if st["is_split"] and st.get("b2_start") and st.get("b2_end") and st["b2_start"] < _cap(st["b2_end"]):
+                emp.shift_type_windows[dowX].append((st["b2_start"], _cap(st["b2_end"])))
 
         # UserShifts → construir ventanas directamente de Block1/Block2
         def _cap_end_from_start(start_t, candidate_end):
             end_eff = candidate_end or time(23, 59)
-            if end_eff == time(0, 0): end_eff = time(23, 59)
+            if end_eff == time(0, 0):
+                end_eff = time(23, 59)
             end_m = min(_t2m(end_eff), _t2m(start_t) + MAX_HOURS_PER_DAY * 60)
             return _m2t(end_m if end_m < 24 * 60 else 0)
 
@@ -861,7 +1042,9 @@ def load_data(week_start: date):
         GAP_MIN = MIN_HOURS_BETWEEN_SPLIT * 60
         DAY_MAX_MIN = MAX_HOURS_PER_DAY * 60
 
-        us_rows = fetchall(cur, '''
+        us_rows = fetchall(
+            cur,
+            """
             SELECT "UserId","Day","Structure",
                    (TIMESTAMP '2000-01-01' + "Block1Start")::time,
                    (TIMESTAMP '2000-01-01' + "Block1lastStart")::time,
@@ -869,7 +1052,8 @@ def load_data(week_start: date):
                    (TIMESTAMP '2000-01-01' + "Block2lastStart")::time
             FROM "Management"."UserShifts"
             ORDER BY "UserId","Day","Block1Start","Block2Start"
-        ''')
+        """,
+        )
 
         us_groups = defaultdict(list)
         for uid7, day7, structure7, b1s, b1e, b2s, b2e in us_rows:
@@ -880,14 +1064,15 @@ def load_data(week_start: date):
             e.no_assign_by_date = set()
 
         for (uid7, day7), rows7 in us_groups.items():
-            if uid7 not in emps_map: continue
+            if uid7 not in emps_map:
+                continue
             emp = emps_map[uid7]
             emp.has_us_row_by_dow[day7] = True
             windows = []
 
             b1_starts = [r[1] for r in rows7 if r[1] is not None]
-            b1_ends   = [r[2] for r in rows7 if r[2] is not None]
-            b2_any    = any(r[3] is not None or r[4] is not None for r in rows7)
+            b1_ends = [r[2] for r in rows7 if r[2] is not None]
+            b2_any = any(r[3] is not None or r[4] is not None for r in rows7)
             multi_b1_no_end = (len(b1_starts) >= 2) and (len(b1_ends) == 0) and (not b2_any)
 
             if multi_b1_no_end:
@@ -982,15 +1167,18 @@ def load_data(week_start: date):
                     for ws7, we7 in local_wins:
                         if ws7 < we7:
                             emp.user_shift_windows[day7].append((ws7, we7))
-                    if b1s and b2s: emp.us_two_starts_dow.add(day7)
+                    if b1s and b2s:
+                        emp.us_two_starts_dow.add(day7)
 
         # Fallback: día SIN UserShift → desde ShiftType windows
         for e in emps:
             for dow in range(7):
-                if e.user_shift_windows.get(dow): continue
+                if e.user_shift_windows.get(dow):
+                    continue
                 raw = e.shift_type_windows.get(dow, [])
                 wins = sorted(list({(w[0], w[1]) for w in raw}), key=lambda w: _t2m(w[0]))
-                if not wins: continue
+                if not wins:
+                    continue
                 if len(wins) >= 2:
                     (s1, e1), (s2, e2) = wins[0], wins[1]
                     if _t2m(s2) - _t2m(s1) < GAP_MIN:
@@ -1050,24 +1238,29 @@ def load_data(week_start: date):
 # OBSERVATION + COALESCE HELPERS
 # ═══════════════════════════════════════════════════════════════════
 
+
 def build_latest_end_map_from_demands(demands):
     result = defaultdict(dict)
     for dm in demands:
         dk = dm.date.isoformat()
         ws_key = str(dm.wsid) if dm.wsid else None
-        if ws_key is None: continue
+        if ws_key is None:
+            continue
         e_min = _t2m(_end_eff(dm.end))
         if ws_key not in result[dk] or e_min > result[dk][ws_key]:
             result[dk][ws_key] = e_min
     return dict(result)
+
 
 def build_latest_end_of_day_map(demands):
     result = {}
     for dm in demands:
         dk = dm.date.isoformat()
         e_min = _t2m(_end_eff(dm.end))
-        if dk not in result or e_min > result[dk]: result[dk] = e_min
+        if dk not in result or e_min > result[dk]:
+            result[dk] = e_min
     return result
+
 
 def coalesce_employee_day_workstation(assigns_day):
     by_key = defaultdict(list)
@@ -1084,7 +1277,8 @@ def coalesce_employee_day_workstation(assigns_day):
         cur_emp, cs, ce, src = rows[0][0], rows[0][1], rows[0][2], rows[0][3][:]
         for _, s, e, src_dms in rows[1:]:
             if s <= ce:
-                ce = max(ce, e); src.extend(src_dms)
+                ce = max(ce, e)
+                src.extend(src_dms)
             else:
                 out.append((cur_emp, cs, ce, src))
                 cur_emp, cs, ce, src = rows[0][0], s, e, src_dms[:]
@@ -1096,6 +1290,7 @@ def coalesce_employee_day_workstation(assigns_day):
 # ═══════════════════════════════════════════════════════════════════
 # GENERATE (IA + UserShift + Hybrid)
 # ═══════════════════════════════════════════════════════════════════
+
 
 def load_previous_suggestions(week_start, week_end):
     """
@@ -1114,18 +1309,22 @@ def load_previous_suggestions(week_start, week_end):
     }
     try:
         with conn() as c, c.cursor() as cur:
-            cur.execute('''
+            cur.execute(
+                """
                 SELECT "Tipo", "Prioridad", "Detalles", "EmpleadosInvolucrados",
                        "WorkstationsAfectadas"
                 FROM "Management"."ScheduleSuggestions"
                 WHERE "WeekStart" = %s AND "WeekEnd" = %s
                 ORDER BY "CreatedAt" DESC
-            ''', (week_start, week_end))
+            """,
+                (week_start, week_end),
+            )
             rows = cur.fetchall()
             if not rows:
                 return hints
 
             import json
+
             for tipo, prio, detalles, emps_json, ws_json in rows:
                 tipo = str(tipo or "")
                 detalles = detalles if isinstance(detalles, dict) else {}
@@ -1138,7 +1337,11 @@ def load_previous_suggestions(week_start, week_end):
                         for name in sin_asig:
                             hints["emps_sin_asignacion"].add(str(name).strip().upper())
                     # Empleados sobrecargados/subutilizados vienen en EmpleadosInvolucrados
-                    if "130%" in str(prio) or "sobrecarga" in str(detalles).lower() or "superior" in str(detalles).lower():
+                    if (
+                        "130%" in str(prio)
+                        or "sobrecarga" in str(detalles).lower()
+                        or "superior" in str(detalles).lower()
+                    ):
                         for name in emps_list:
                             hints["emps_sobrecargados"].add(str(name).strip().upper())
                     if "inferior" in str(detalles).lower() or "capacidad" in str(detalles).lower():
@@ -1149,24 +1352,242 @@ def load_previous_suggestions(week_start, week_end):
                     gaps = detalles.get("gaps_detectados", 0)
                     for ws_name in ws_list:
                         hints["ws_con_gaps"][str(ws_name).strip().upper()] = max(
-                            hints["ws_con_gaps"].get(str(ws_name).strip().upper(), 0),
-                            int(gaps)
+                            hints["ws_con_gaps"].get(str(ws_name).strip().upper(), 0), int(gaps)
                         )
 
             n_sin = len(hints["emps_sin_asignacion"])
             n_sobre = len(hints["emps_sobrecargados"])
             n_sub = len(hints["emps_subutilizados"])
             n_ws = len(hints["ws_con_gaps"])
-            print(f"[SUGERENCIAS] Cargadas {len(rows)} sugerencias previas: "
-                  f"{n_sin} sin asig, {n_sobre} sobrecargados, {n_sub} subutilizados, {n_ws} ws con gaps")
+            print(
+                f"[SUGERENCIAS] Cargadas {len(rows)} sugerencias previas: "
+                f"{n_sin} sin asig, {n_sobre} sobrecargados, {n_sub} subutilizados, {n_ws} ws con gaps"
+            )
     except Exception as e:
         print(f"[SUGERENCIAS] Error cargando: {e}")
 
     return hints
 
 
+# ═══════════════════════════════════════════════════════════════════
+# REPAIR ENGINE WRAPPER
+# ═══════════════════════════════════════════════════════════════════
+
+
+def apply_repair_if_beneficial(emps, demands, sched, coverage_stats, overrides, reglas, generator, debug=True):
+    """
+    Wrapper aislado del ScheduleRepairEngine para integración en generate_ai().
+
+    Trabaja siempre sobre copias estructurales de sched y coverage_stats.
+    NUNCA muta el original hasta haber verificado todas las condiciones:
+      1. Sin excepción en el motor de reparación.
+      2. covered_slots mejora estrictamente (covered_after > covered_before).
+      3. validate_schedule_integrity() no detecta solapamientos ni inconsistencias.
+      4. No hay violaciones duras nuevas (violations_hard == 0).
+
+    Si cualquier condición falla, sched y coverage_stats quedan exactamente
+    como estaban. No hay mutaciones parciales.
+
+    Retorna dict de log con las métricas requeridas:
+        repair_enabled, covered_slots_before, covered_slots_after,
+        gaps_before, gaps_after, repairs_attempted, repairs_applied,
+        execution_time_ms, repair_applied, repair_discard_reason.
+    """
+    log = {
+        "repair_enabled": True,
+        "covered_slots_before": 0,
+        "covered_slots_after": 0,
+        "gaps_before": 0,
+        "gaps_after": 0,
+        "repairs_attempted": 0,
+        "repairs_applied": 0,
+        "execution_time_ms": 0,
+        "repair_applied": False,
+        "repair_discard_reason": "",
+    }
+
+    covered_before = sum(cs.get("covered", 0) for cs in coverage_stats.values())
+    log["covered_slots_before"] = covered_before
+
+    try:
+        from services.repair_engine import ScheduleRepairEngine
+
+        # ── Copias estructurales ──────────────────────────────────────────────
+        # sched: {date: [(Emp, Demand)]}  — se copian las listas, no los objetos
+        sched_copy = defaultdict(list, {d: list(lst) for d, lst in sched.items()})
+
+        # coverage_stats: {id: {"demand": Demand, "covered": int, ...}}
+        # Se copian los dicts internos y la lista "employees" para evitar
+        # que el engine mute referencias compartidas con el original.
+        cs_copy = {}
+        for k, v in coverage_stats.items():
+            cs_copy[k] = dict(v)
+            emp_list = cs_copy[k].get("employees")
+            if isinstance(emp_list, list):
+                cs_copy[k]["employees"] = list(emp_list)
+
+        engine = ScheduleRepairEngine(
+            emps=emps,
+            demands=demands,
+            validador=generator.validador,
+            reglas=reglas,
+            overrides=overrides,
+            debug=debug,
+        )
+        result = engine.reparar(sched_copy, cs_copy)
+
+        covered_after = sum(cs.get("covered", 0) for cs in cs_copy.values())
+        log.update(
+            {
+                "covered_slots_after": covered_after,
+                "gaps_before": result.gaps_before,
+                "gaps_after": result.gaps_after,
+                "repairs_attempted": result.repairs_attempted,
+                "repairs_applied": result.repairs_applied,
+                "execution_time_ms": result.execution_time_ms,
+            }
+        )
+
+        # ── Condición 1: la cobertura debe mejorar ───────────────────────────
+        if covered_after <= covered_before:
+            log["repair_discard_reason"] = "NO_IMPROVEMENT"
+            return log
+
+        # ── Condición 2: integridad estructural ──────────────────────────────
+        is_valid, integrity_errors = engine.validate_schedule_integrity(sched_copy, cs_copy)
+        if not is_valid:
+            log["repair_discard_reason"] = f"INTEGRITY_CHECK_FAILED: {integrity_errors[:2]}"
+            return log
+
+        # ── Condición 3: sin violaciones duras nuevas ────────────────────────
+        if result.repaired_score.violations_hard > 0:
+            log["repair_discard_reason"] = f"HARD_VIOLATIONS_DETECTED: {result.repaired_score.violations_hard}"
+            return log
+
+        # ── Aplicar: transferir copia al original (in-place) ─────────────────
+        # En este punto las 3 condiciones están verificadas en sched_copy/cs_copy.
+        # Solo ahora mutamos el original.
+        sched.clear()
+        sched.update(sched_copy)
+        coverage_stats.clear()
+        coverage_stats.update(cs_copy)
+
+        log["repair_applied"] = True
+
+    except Exception as _exc:
+        import traceback as _tb
+
+        log["repair_discard_reason"] = f"EXCEPTION: {type(_exc).__name__}: {_exc}"
+        _tb.print_exc()
+        # sched y coverage_stats NO han sido modificados — las copias se descartan
+
+    return log
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SKILL COVERAGE ANALYSIS WRAPPER
+# ═══════════════════════════════════════════════════════════════════
+
+
+def apply_skill_coverage_analysis_if_available(emps, demands, sched, coverage_stats, reglas=None):
+    """
+    Wrapper seguro para el SkillCoverageAnalyzer.
+
+    Ejecuta el diagnóstico de cobertura por skill/workstation DESPUÉS del
+    RepairEngine, antes del bloque AUSENCIAS.  Analiza solo demandas reales
+    con wsid != None — las pseudo-demandas de ausencia no existen todavía
+    en este punto del flujo.
+
+    Garantías:
+      - NUNCA modifica sched ni coverage_stats.
+      - Cualquier excepción queda capturada: devuelve {} en lugar de propagar.
+      - El resultado es siempre JSON-serializable (solo str/int/float/list/dict).
+
+    Retorna:
+        dict — reporte completo con las 8 secciones de to_report_dict(),
+               o dict vacío si el analizador falla.
+
+    Las métricas de log se incluyen en el dict retornado bajo "_log":
+        {
+            "enabled": True,
+            "workstations": N,
+            "structural": N,
+            "algorithmic": N,
+            "critical": N,
+            "recommendations": N,
+            "time_ms": N,
+            "failed": False,
+            "error": "",
+        }
+    """
+    import time as _time_mod
+    import json
+
+    _log = {
+        "enabled": True,
+        "workstations": 0,
+        "structural": 0,
+        "algorithmic": 0,
+        "critical": 0,
+        "recommendations": 0,
+        "time_ms": 0,
+        "failed": False,
+        "error": "",
+    }
+
+    t0 = _time_mod.perf_counter()
+
+    try:
+        # Filtrar solo demandas reales (wsid != None) para el análisis
+        real_demands = [dm for dm in demands if getattr(dm, "wsid", None) is not None]
+
+        analyzer = SkillCoverageAnalyzer(
+            role_fallbacks=ROLE_FALLBACKS_BY_NAME,
+            reglas=reglas or REGLAS_DURAS_DEFAULTS,
+            debug=False,
+        )
+
+        summaries = analyzer.analyze(
+            emps=emps,
+            demands=real_demands,
+            sched=sched,
+            coverage_stats=coverage_stats,
+        )
+
+        recommendations = analyzer.recommend_training(summaries, emps)
+        report = analyzer.to_report_dict(summaries, recommendations)
+
+        # Calcular métricas de log
+        from services.skill_coverage_analyzer import DeficitType
+
+        _log["workstations"] = len(summaries)
+        _log["structural"] = sum(1 for s in summaries if s.structural_deficit)
+        _log["algorithmic"] = sum(1 for s in summaries if s.primary_deficit_type == DeficitType.ALGORITHMIC_GAP)
+        _log["critical"] = sum(1 for s in summaries if s.severity.value == "CRITICAL")
+        _log["recommendations"] = len(recommendations)
+        _log["time_ms"] = round((_time_mod.perf_counter() - t0) * 1000)
+
+        # Verificar que el reporte sea JSON-serializable antes de devolverlo.
+        # Si json.dumps lanza TypeError, el try externo lo captura.
+        json.dumps(report)
+
+        report["_log"] = _log
+        return report
+
+    except Exception as _exc:
+        import traceback as _tb
+
+        _log["failed"] = True
+        _log["error"] = f"{type(_exc).__name__}: {_exc}"
+        _log["time_ms"] = round((_time_mod.perf_counter() - t0) * 1000)
+        _tb.print_exc()
+        return {"_log": _log}
+
+
 def generate_ai(week_start: date):
-    emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map = load_data(week_start)
+    emps, demands, (tpl_id, tpl_name), week, shift_types, reglas, hybrid_pairs, hybrid_partner_map = load_data(
+        week_start
+    )
 
     # ── PLAN USERSHIFT MODES ──
     overrides, usershift_plan = plan_usershift_day_modes(emps, demands, week)
@@ -1178,6 +1599,7 @@ def generate_ai(week_start: date):
     #   3) El merge usa decay para que datos viejos pierdan peso gradualmente
     # Esto garantiza que siempre hay datos frescos de BD (no solo el pickle viejo).
     from services.aprendizaje_historico import AprendizajeHistoricoService
+
     modelo = None
     csv_path = CSV_ENTRENAMIENTO if os.path.exists(CSV_ENTRENAMIENTO) else None
     t_start = week_start - timedelta(days=84)
@@ -1189,12 +1611,16 @@ def generate_ai(week_start: date):
             # Paso 1: Extraer modelo fresco de BD + CSV
             if csv_path:
                 ai_svc.entrenar_combinado(csv_path, t_start, week[-1])
-                print(f"[AI] Modelo fresco CSV+BD entrenado "
-                      f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})")
+                print(
+                    f"[AI] Modelo fresco CSV+BD entrenado "
+                    f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})"
+                )
             else:
                 ai_svc.entrenar_desde_bd(t_start, week[-1])
-                print(f"[AI] Modelo fresco BD entrenado "
-                      f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})")
+                print(
+                    f"[AI] Modelo fresco BD entrenado "
+                    f"(reg={ai_svc.modelo.registros_procesados}, sem={ai_svc.modelo.semanas_procesadas})"
+                )
             modelo_fresco = ai_svc.modelo
 
             # Paso 2: Intentar cargar modelo previo para heredar aprendizaje acumulado
@@ -1203,8 +1629,10 @@ def generate_ai(week_start: date):
                 ai_prev = AprendizajeHistoricoService(cursor=cur_ai, debug=False)
                 if ai_prev._cargar_modelo_activo() and ai_prev.modelo:
                     modelo_previo = ai_prev.modelo
-                    print(f"[AI] Modelo previo encontrado "
-                          f"(v={modelo_previo.version}, reg={modelo_previo.registros_procesados})")
+                    print(
+                        f"[AI] Modelo previo encontrado "
+                        f"(v={modelo_previo.version}, reg={modelo_previo.registros_procesados})"
+                    )
             except Exception:
                 pass
 
@@ -1215,8 +1643,9 @@ def generate_ai(week_start: date):
                 # Queremos que el previo reciba decay, no el fresco.
                 # Así que: base=previo (con decay), nuevo=fresco (se suma completo)
                 modelo = ai_svc._merge_modelos(modelo_previo, modelo_fresco, decay=0.3)
-                print(f"[AI] Merge: previo(decay=0.3) + fresco(completo) → "
-                      f"{len(modelo.afinidad_emp_ws)} afinidades")
+                print(
+                    f"[AI] Merge: previo(decay=0.3) + fresco(completo) → " f"{len(modelo.afinidad_emp_ws)} afinidades"
+                )
             else:
                 modelo = modelo_fresco
                 print(f"[AI] Primera tirada, usando modelo fresco")
@@ -1249,7 +1678,9 @@ def generate_ai(week_start: date):
     # Pasar max_horas_dia para penalización diaria
     generator.scorer._max_horas_dia = reglas.get("max_horas_por_dia", MAX_HOURS_PER_DAY)
     sched, coverage_stats, days_off_diag = generator.generar(
-        emps=emps, demands=demands, week=week,
+        emps=emps,
+        demands=demands,
+        week=week,
         overrides=overrides,
         hybrid_groups=hybrid_groups,
         min_coverage_pct=91.0,
@@ -1257,19 +1688,78 @@ def generate_ai(week_start: date):
 
     # ── HYBRID 0.5 FALLBACK (solo remata huecos restantes) ──
     apply_hybrid_05_postprocess(
-        emps, demands, week, sched, coverage_stats, overrides,
-        hybrid_pairs=hybrid_pairs, reglas=reglas,
+        emps,
+        demands,
+        week,
+        sched,
+        coverage_stats,
+        overrides,
+        hybrid_pairs=hybrid_pairs,
+        reglas=reglas,
     )
+
+    # ── REPAIR ENGINE (post-generación, con fallback garantizado) ──
+    _repair_log = apply_repair_if_beneficial(
+        emps=emps,
+        demands=demands,
+        sched=sched,
+        coverage_stats=coverage_stats,
+        overrides=overrides,
+        reglas=reglas,
+        generator=generator,
+        debug=True,
+    )
+    print(
+        f"[REPAIR] enabled={_repair_log['repair_enabled']} | "
+        f"applied={_repair_log['repair_applied']} | "
+        f"slots={_repair_log['covered_slots_before']}\u2192{_repair_log['covered_slots_after']} | "
+        f"gaps={_repair_log['gaps_before']}\u2192{_repair_log['gaps_after']} | "
+        f"attempts={_repair_log['repairs_attempted']} | "
+        f"repairs={_repair_log['repairs_applied']} | "
+        f"time={_repair_log['execution_time_ms']}ms"
+        + (f" | discard='{_repair_log['repair_discard_reason']}'" if _repair_log.get("repair_discard_reason") else "")
+    )
+
+    # ── SKILL COVERAGE ANALYSIS (diagnóstico post-repair, antes de AUSENCIAS) ──
+    _skill_report = apply_skill_coverage_analysis_if_available(
+        emps=emps,
+        demands=demands,
+        sched=sched,
+        coverage_stats=coverage_stats,
+        reglas=reglas,
+    )
+    _sc_log = _skill_report.get("_log", {})
+    if _sc_log.get("failed"):
+        print(f"[SKILL-COVERAGE] enabled=True | failed=True | " f"error='{_sc_log.get('error', '')}'")
+    else:
+        print(
+            f"[SKILL-COVERAGE] enabled=True | "
+            f"workstations={_sc_log.get('workstations', 0)} | "
+            f"structural={_sc_log.get('structural', 0)} | "
+            f"algorithmic={_sc_log.get('algorithmic', 0)} | "
+            f"critical={_sc_log.get('critical', 0)} | "
+            f"recommendations={_sc_log.get('recommendations', 0)} | "
+            f"time={_sc_log.get('time_ms', 0)}ms"
+        )
 
     # ── AUSENCIAS ──
     for emp in emps:
         for d in emp.absent:
             if week_start <= d <= week[-1]:
-                pseudo_dm = type("Pseudo", (), {
-                    "id": uid(), "wsid": None, "wsname": "AUSENCIA",
-                    "start": time(0, 0), "end": time(0, 0), "date": d,
-                    "shift_type": None, "is_hybrid_05": False,
-                })()
+                pseudo_dm = type(
+                    "Pseudo",
+                    (),
+                    {
+                        "id": uid(),
+                        "wsid": None,
+                        "wsname": "AUSENCIA",
+                        "start": time(0, 0),
+                        "end": time(0, 0),
+                        "date": d,
+                        "shift_type": None,
+                        "is_hybrid_05": False,
+                    },
+                )()
                 sched[d].append((emp, pseudo_dm))
 
     # ── BUILD RESPONSE JSON ──
@@ -1306,16 +1796,18 @@ def generate_ai(week_start: date):
                 "covered": s["covered"],
                 "unmet": s["unmet"],
                 "coverage_pct": s["coverage_pct"],
-            } for d_id, s in coverage_stats.items()
+            }
+            for d_id, s in coverage_stats.items()
         },
+        "skill_coverage_report": _skill_report if not _sc_log.get("failed") else None,
+        "gap_filler_diagnostics": getattr(generator, "_last_gfp_result", {}).get("gap_filler_diagnostics"),
         "schedule": {},
     }
 
     for d in week:
         k = d.isoformat()
         res["schedule"][k] = []
-        for emp, dm in sorted(sched.get(d, []),
-                              key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
+        for emp, dm in sorted(sched.get(d, []), key=lambda x: (x[0].name, x[1].wsname, _t2m(x[1].start))):
             day_key = d.isoformat()
             ws_latest = (latest_end_by_wsid.get(day_key, {}) or {}).get(str(dm.wsid)) if dm.wsid else None
             last_day = latest_end_by_day.get(day_key)
@@ -1333,15 +1825,17 @@ def generate_ai(week_start: date):
             else:
                 obs = "C" if dm.end == time(23, 59) else "BT"
 
-            res["schedule"][k].append({
-                "employee_id": str(emp.id),
-                "employee_name": emp.name,
-                "workstation_id": str(dm.wsid) if dm.wsid else None,
-                "workstation_name": dm.wsname,
-                "start_time": dm.start.strftime("%H:%M") if dm.start else None,
-                "end_time": dm.end.strftime("%H:%M") if dm.end else None,
-                "observation": obs,
-            })
+            res["schedule"][k].append(
+                {
+                    "employee_id": str(emp.id),
+                    "employee_name": emp.name,
+                    "workstation_id": str(dm.wsid) if dm.wsid else None,
+                    "workstation_name": dm.wsname,
+                    "start_time": dm.start.strftime("%H:%M") if dm.start else None,
+                    "end_time": dm.end.strftime("%H:%M") if dm.end else None,
+                    "observation": obs,
+                }
+            )
 
     return res, sched, emps, week, demands, coverage_stats
 
@@ -1350,29 +1844,35 @@ def generate_ai(week_start: date):
 # CLEANUP
 # ═══════════════════════════════════════════════════════════════════
 
+
 def cleanup_null_workstation_schedules(cur, ws, we):
     try:
-        cur.execute('''
+        cur.execute(
+            """
             DELETE FROM "Management"."Schedules"
             WHERE "Date" BETWEEN %s AND %s
               AND "WorkstationId" IS NULL AND "StartTime" IS NULL AND "EndTime" IS NULL
               AND "Observation" NOT IN ('ABS','VAC')
-        ''', (ws, we))
+        """,
+            (ws, we),
+        )
         return cur.rowcount
-    except: return 0
+    except:
+        return 0
 
 
 # ═══════════════════════════════════════════════════════════════════
 # ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/api/health')
+
+@app.route("/api/health")
 def health():
     st = {"status": "checking", "timestamp": now().isoformat(), "version": "5.0-iterative-hybrid-gen", "checks": {}}
     try:
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT version()")
-            st["checks"]["database"] = {"status": "healthy", "version": cur.fetchone()[0].split(',')[0]}
+            st["checks"]["database"] = {"status": "healthy", "version": cur.fetchone()[0].split(",")[0]}
             st["status"] = "healthy"
     except Exception as e:
         st["checks"]["database"] = {"status": "unhealthy", "message": str(e)}
@@ -1380,38 +1880,51 @@ def health():
     return jsonify(st), (200 if st["status"] == "healthy" else 503)
 
 
-@app.route('/api/agenda/preview')
+@app.route("/api/agenda/preview")
 def preview():
-    wk = request.args.get('week_start')
-    if not wk: return jsonify({"error": "Falta week_start"}), 400
-    try: ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
-    except ValueError: return jsonify({"error": "Fecha inválida"}), 400
+    wk = request.args.get("week_start")
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
+    try:
+        ws = monday(datetime.strptime(wk, "%Y-%m-%d").date())
+    except ValueError:
+        return jsonify({"error": "Fecha inválida"}), 400
     try:
         res, _, _, _, _, _ = generate_ai(ws)
         return jsonify(res), 200
-    except (DatabaseConnectionError, DataNotFoundError) as e:
+    except (DatabaseConnectionError, DataNotFoundError, DataIntegrityError) as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        import traceback as _tb
+
+        _tb.print_exc()  # visible en el terminal del servidor
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 
-@app.route('/api/agenda/save', methods=['POST'])
+@app.route("/api/agenda/save", methods=["POST"])
 def save():
     data = request.get_json() or {}
-    wk = data.get('week_start')
-    force = bool(data.get('force', False))
-    if not wk: return jsonify({"error": "Falta week_start"}), 400
-    try: ws = monday(datetime.strptime(wk, '%Y-%m-%d').date())
-    except ValueError: return jsonify({"error": "Fecha inválida"}), 400
+    wk = data.get("week_start")
+    force = bool(data.get("force", False))
+    if not wk:
+        return jsonify({"error": "Falta week_start"}), 400
+    try:
+        ws = monday(datetime.strptime(wk, "%Y-%m-%d").date())
+    except ValueError:
+        return jsonify({"error": "Fecha inválida"}), 400
 
     we = ws + timedelta(days=6)
     token = data.get("token") or f"{ws.isoformat()}|ai|{uid()[:8]}"
 
     try:
         res, sched, emps, week, demands, coverage_stats = generate_ai(ws)
-    except (DatabaseConnectionError, DataNotFoundError) as e:
+    except (DatabaseConnectionError, DataNotFoundError, DataIntegrityError) as e:
         return jsonify({"error": str(e)}), 400
 
-    inserted_gaps = 0; inserted_quality = 0
-    sugerencias_generadas = []; ajustes_ia = []
+    inserted_gaps = 0
+    inserted_quality = 0
+    sugerencias_generadas = []
+    ajustes_ia = []
 
     try:
         with conn() as c, c.cursor() as cur:
@@ -1421,35 +1934,58 @@ def save():
 
             if force:
                 cur.execute('DELETE FROM "Management"."Schedules" WHERE "Date" BETWEEN %s AND %s', (ws, we))
-                for tbl, col in [("ScheduleGaps", "Date"), ("ScheduleQualityShiftScores", "Date"),
-                                  ("ScheduleSuggestions", "WeekStart")]:
-                    try: cur.execute(f'DELETE FROM "Management"."{tbl}" WHERE "{col}" BETWEEN %s AND %s', (ws, we))
-                    except: pass
-                try: cur.execute('DELETE FROM "Management"."AIPredictions" WHERE "Token" LIKE %s', (f"{ws.isoformat()}%",))
-                except: pass
+                for tbl, col in [
+                    ("ScheduleGaps", "Date"),
+                    ("ScheduleQualityShiftScores", "Date"),
+                    ("ScheduleSuggestions", "WeekStart"),
+                ]:
+                    try:
+                        cur.execute(f'DELETE FROM "Management"."{tbl}" WHERE "{col}" BETWEEN %s AND %s', (ws, we))
+                    except:
+                        pass
+                try:
+                    cur.execute(
+                        'DELETE FROM "Management"."AIPredictions" WHERE "Token" LIKE %s', (f"{ws.isoformat()}%",)
+                    )
+                except:
+                    pass
 
             # ═══════════════════════════════════════════════════════════
             # v5.0 FLUJO CORREGIDO: INSERT SCHEDULES PRIMERO, luego HUs
             # Los servicios HU necesitan los Schedules en BD para funcionar.
             # ═══════════════════════════════════════════════════════════
 
-# ═════ INSERT SCHEDULES ═════
+            # ═════ INSERT SCHEDULES ═════
             latest_end_by_wsid = res.get("latest_end_by_wsid", {})
             latest_end_by_day = res.get("latest_end_of_day", {})
             MIN_BLOCK_SAVE_MIN = MIN_SHIFT_DURATION_HOURS * 60
 
             for d in week:
                 ass = sched.get(d, [])
-                if not ass: continue
+                if not ass:
+                    continue
                 for emp, dm in ass:
                     if dm is None or dm.wsid is None:
-                        cur.execute('''
+                        cur.execute(
+                            """
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
                                  "StartTime","EndTime","Observation","IsDeleted","DateCreated","Token")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (uid(), d, str(emp.id), None, None, None,
-                              emp.abs_reason.get(d, 'ABS'), False, now(), token))
+                        """,
+                            (
+                                uid(),
+                                d,
+                                str(emp.id),
+                                None,
+                                None,
+                                None,
+                                emp.abs_reason.get(d, "ABS"),
+                                False,
+                                now(),
+                                token,
+                            ),
+                        )
 
                 coalesced = coalesce_employee_day_workstation(ass)
 
@@ -1472,7 +2008,7 @@ def save():
                             continue
 
                         # ── VALIDACIÓN: no guardar si el WS vino de ROLE_FALLBACKS ──
-                        if hasattr(emp, 'roles_originales') and wsid not in emp.roles_originales:
+                        if hasattr(emp, "roles_originales") and wsid not in emp.roles_originales:
                             if ASCII_LOGS:
                                 print(f"[SAVE-SKIP] {d} {emp.name}: ws={wsid} no en roles_originales")
                             continue
@@ -1525,7 +2061,9 @@ def save():
                             # Cualquier otra combinación es solapamiento real
                             has_overlap = True
                             if ASCII_LOGS:
-                                print(f"[SAVE-OVERLAP] {d} {emp.name}: {_m2t(s_min)}-{_m2t(e_min)} ws={wsid}(hyb={is_hyb}) solapa con ws={prev_ws}(hyb={prev_hyb})")
+                                print(
+                                    f"[SAVE-OVERLAP] {d} {emp.name}: {_m2t(s_min)}-{_m2t(e_min)} ws={wsid}(hyb={is_hyb}) solapa con ws={prev_ws}(hyb={prev_hyb})"
+                                )
                             break
                         if has_overlap:
                             continue
@@ -1538,21 +2076,31 @@ def save():
                         e_t = _m2t(e_min if e_min < 1440 else 0)
                         obs = "C" if e_t == time(23, 59) else "BT"
 
-                        cur.execute('''
+                        cur.execute(
+                            """
                             INSERT INTO "Management"."Schedules"
                                 ("Id","Date","UserId","WorkstationId",
                                  "StartTime","EndTime","Observation",
                                  "IsDeleted","DateCreated","Token")
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ''', (uid(), d, str(emp.id), str(wsid),
-                              timedelta(hours=s_t.hour, minutes=s_t.minute),
-                              timedelta(hours=e_t.hour, minutes=e_t.minute),
-                              obs, False, now(), token))
+                        """,
+                            (
+                                uid(),
+                                d,
+                                str(emp.id),
+                                str(wsid),
+                                timedelta(hours=s_t.hour, minutes=s_t.minute),
+                                timedelta(hours=e_t.hour, minutes=e_t.minute),
+                                obs,
+                                False,
+                                now(),
+                                token,
+                            ),
+                        )
 
-            
             # ═════ AHORA LOS SERVICIOS HU (después del INSERT) ═════
 
-# ═══════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════
             # v4.2 FLUJO MEJORADO: HU 1.1 → HU 1.2 → HU 1.3 → HU 1.6
             # Cada paso alimenta al siguiente con sus resultados
             # ═══════════════════════════════════════════════════════════
@@ -1564,10 +2112,12 @@ def save():
             cur.execute("SAVEPOINT hu11")
             try:
                 from services.explicador_huecos import ExplicadorHuecosService, ContextoExplicacion
+
                 asignaciones_por_empleado = defaultdict(list)
                 for d0 in sorted(sched.keys()):
                     for emp0, dm0 in sched[d0]:
-                        if dm0 is None or dm0.wsid is None: continue
+                        if dm0 is None or dm0.wsid is None:
+                            continue
                         ini0 = datetime.combine(d0, dm0.start)
                         fin0 = datetime.combine(d0, dm0.end)
                         if dm0.end == time(0, 0) or fin0 <= ini0:
@@ -1585,24 +2135,38 @@ def save():
                 print(f"[HU1.1] {inserted_gaps} gaps guardados en BD")
                 cur.execute("RELEASE SAVEPOINT hu11")
             except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu11")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu11")
-                except: pass
-                print(f"[HU1.1] Error: {e}"); import traceback; traceback.print_exc()
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT hu11")
+                except:
+                    pass
+                try:
+                    cur.execute("RELEASE SAVEPOINT hu11")
+                except:
+                    pass
+                print(f"[HU1.1] Error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
             # ═════ HU 1.2 QUALITY (puntaje por turno) ═════
             cur.execute("SAVEPOINT hu12")
             try:
                 from services.puntaje_calidad_turno import ScheduleQualityService
+
                 quality_svc = ScheduleQualityService(cur)
                 # v4.2: Pasar coverage_stats completo para guardar detalle por slot
                 quality_result = quality_svc.calcular_y_guardar(
-                    token=token, ws=ws, we=we,
-                    res={"unmet_demands": [
-                        {"required": cs["demand"].need, "covered": cs["covered"], "unmet": cs["unmet"]}
-                        for cs in coverage_stats.values()]},
-                    sched=sched, emps=emps,
+                    token=token,
+                    ws=ws,
+                    we=we,
+                    res={
+                        "unmet_demands": [
+                            {"required": cs["demand"].need, "covered": cs["covered"], "unmet": cs["unmet"]}
+                            for cs in coverage_stats.values()
+                        ]
+                    },
+                    sched=sched,
+                    emps=emps,
                     coverage_stats=coverage_stats,
                     is_post_ai=True,
                 )
@@ -1610,16 +2174,24 @@ def save():
                 print(f"[HU1.2] Score={quality_result.get('score', 0):.2f}, {inserted_quality} registros en BD")
                 cur.execute("RELEASE SAVEPOINT hu12")
             except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu12")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu12")
-                except: pass
-                print(f"[HU1.2] Error: {e}"); import traceback; traceback.print_exc()
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT hu12")
+                except:
+                    pass
+                try:
+                    cur.execute("RELEASE SAVEPOINT hu12")
+                except:
+                    pass
+                print(f"[HU1.2] Error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
             # ═════ HU 1.3 SUGGESTIONS (sugerencias) ═════
             cur.execute("SAVEPOINT hu13")
             try:
                 from services.sugerencias_mejora import SugerenciasMejoraService
+
                 sug_svc = SugerenciasMejoraService(cursor=cur, debug=True)
                 # v4.2: Pasar las explicaciones COMPLETAS de HU 1.1 (no raw gaps)
                 # para que tenga categorías, razones, etc.
@@ -1636,29 +2208,41 @@ def save():
                 print(f"[HU1.3] {len(sugerencias_generadas)} sugerencias guardadas en BD")
                 cur.execute("RELEASE SAVEPOINT hu13")
             except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu13")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu13")
-                except: pass
-                print(f"[HU1.3] Error: {e}"); import traceback; traceback.print_exc()
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT hu13")
+                except:
+                    pass
+                try:
+                    cur.execute("RELEASE SAVEPOINT hu13")
+                except:
+                    pass
+                print(f"[HU1.3] Error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
             # ═════ HU 1.6 VALIDATION (validador de reglas) ═════
             cur.execute("SAVEPOINT hu16")
             try:
                 from services.validador_reglas import ValidadorReglasService
+
                 val_svc = ValidadorReglasService(cursor=cur, debug=True)
                 val_result = val_svc.validar_y_guardar(
-                    sched=sched, token=token, week_start=ws, week_end=we,
-                    emps=emps, is_post_ai=True)
+                    sched=sched, token=token, week_start=ws, week_end=we, emps=emps, is_post_ai=True
+                )
                 print(f"[HU1.6] {val_result.total_violaciones} violaciones")
                 res["summary"]["hu16_violations"] = val_result.total_violaciones
                 res["summary"]["hu16_schedule_valid"] = val_result.schedule_valido
                 cur.execute("RELEASE SAVEPOINT hu16")
             except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu16")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu16")
-                except: pass
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT hu16")
+                except:
+                    pass
+                try:
+                    cur.execute("RELEASE SAVEPOINT hu16")
+                except:
+                    pass
                 print(f"[HU1.6] Error: {e}")
 
             # ═════ HU 1.4 POST-SAVE TRAINING (INCREMENTAL v5.0) ═════
@@ -1668,6 +2252,7 @@ def save():
             cur.execute("SAVEPOINT hu14")
             try:
                 from services.aprendizaje_historico import AprendizajeHistoricoService
+
                 ai_post = AprendizajeHistoricoService(cur, debug=True)
                 t_start = ws - timedelta(days=84)
 
@@ -1702,24 +2287,37 @@ def save():
                     notes_parts.append(f"gaps={inserted_gaps}")
                     notes_parts.append(f"sugs={len(sugerencias_generadas) if sugerencias_generadas else 0}")
                     ai_post.registrar_training_history(
-                        model_id=mid, data_start=t_start, data_end=we,
+                        model_id=mid,
+                        data_start=t_start,
+                        data_end=we,
                         notes=" | ".join(notes_parts),
-                        coverage_improvement=coverage_pct)
-                except: pass
+                        coverage_improvement=coverage_pct,
+                    )
+                except:
+                    pass
                 print(f"[HU1.4] Modelo {'incremental' if had_prev else 'nuevo'} guardado: {mid}")
                 cur.execute("RELEASE SAVEPOINT hu14")
             except Exception as e:
-                try: cur.execute("ROLLBACK TO SAVEPOINT hu14")
-                except: pass
-                try: cur.execute("RELEASE SAVEPOINT hu14")
-                except: pass
-                print(f"[HU1.4] Error: {e}"); import traceback; traceback.print_exc()
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT hu14")
+                except:
+                    pass
+                try:
+                    cur.execute("RELEASE SAVEPOINT hu14")
+                except:
+                    pass
+                print(f"[HU1.4] Error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
             cleanup_null_workstation_schedules(cur, ws, we)
             c.commit()
 
     except Exception as e:
-        import traceback; traceback.print_exc()
+        import traceback
+
+        traceback.print_exc()
         return jsonify({"error": "Error al guardar", "detail": str(e)}), 500
 
     out = dict(res) if isinstance(res, dict) else {"result": res}
