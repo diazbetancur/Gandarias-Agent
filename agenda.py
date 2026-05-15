@@ -1370,6 +1370,27 @@ def load_previous_suggestions(week_start, week_end):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# COVERAGE RECALCULATION HELPER
+# ═══════════════════════════════════════════════════════════════════
+
+
+def recalculate_coverage_percentages(coverage_stats: dict) -> None:
+    """
+    Recalcula coverage_pct y unmet en coverage_stats a partir de
+    demand.need y covered actuales.
+
+    Debe llamarse después de cualquier fase (RepairEngine, GapFiller,
+    Hybrid05) que modifique cs["covered"] sin actualizar cs["coverage_pct"].
+    Muta coverage_stats in-place; no devuelve nada.
+    """
+    for cs in coverage_stats.values():
+        n = cs["demand"].need
+        cov = cs["covered"]
+        cs["unmet"] = max(n - cov, 0)
+        cs["coverage_pct"] = round((cov / n) * 100.0, 1) if n > 0 else 100.0
+
+
+# ═══════════════════════════════════════════════════════════════════
 # REPAIR ENGINE WRAPPER
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1761,6 +1782,33 @@ def generate_ai(week_start: date):
                     },
                 )()
                 sched[d].append((emp, pseudo_dm))
+
+    # ── RECALCULAR coverage_pct y unmet (post todas las fases) ──
+    # GapFiller, Hybrid05 y RepairEngine pueden modificar covered/unmet
+    # sin actualizar coverage_pct.  Este paso garantiza consistencia.
+    _stale_pre = [
+        (d_id, cs["demand"].wsname, cs["demand"].date, cs["covered"], cs["demand"].need, cs["coverage_pct"])
+        for d_id, cs in coverage_stats.items()
+        if cs["covered"] > 0 and cs["demand"].need > 0 and cs["coverage_pct"] == 0.0
+    ]
+    recalculate_coverage_percentages(coverage_stats)
+    _stale_post = [
+        (d_id, cs["demand"].wsname, cs["demand"].date, cs["covered"], cs["demand"].need, cs["coverage_pct"])
+        for d_id, cs in coverage_stats.items()
+        if cs["covered"] > 0 and cs["demand"].need > 0 and cs["coverage_pct"] == 0.0
+    ]
+    if _stale_pre:
+        print(
+            f"[COVERAGE-RECALC] corregidos={len(_stale_pre)} "
+            f"stale-antes={len(_stale_pre)} stale-despues={len(_stale_post)} "
+            f"total={len(coverage_stats)}"
+        )
+    else:
+        print(f"[COVERAGE-RECALC] sin entradas obsoletas | total={len(coverage_stats)}")
+    if _stale_post:
+        # Nunca debería llegar aquí; si ocurre, reportar los primeros casos
+        for d_id, wsname, d, cov, need, pct in _stale_post[:5]:
+            print(f"[COVERAGE-BUG] {wsname} {d} covered={cov} need={need} pct={pct} id={d_id}")
 
     # ── BUILD RESPONSE JSON ──
     total_req = sum(dm.need for dm in demands)
