@@ -701,25 +701,49 @@ class ScorerCandidatos:
         penalty_s = self._suggestion_penalty(ws_id)
         penalty_v = self._violation_penalty(ws_id)
 
-        # ══ PESOS: BALANCE SEMANAL + DIARIO dominan (50%) ══
+        # ══ PESOS v5.1: HISTÓRICO + BALANCE ══
+        # Cambio: la afinidad emp-ws y el patrón de día suben de peso para que
+        # el sistema refleje el histórico (Eneko mié-dom 16h, Félix lun-mié, etc.)
+        # La equidad sigue presente pero no aplasta la preferencia histórica.
         score = (
-            0.08 * s_af  # Afinidad histórica
-            + 0.04 * s_h  # Horario típico
-            + 0.22 * s_balance  # BALANCE DE CARGA SEMANAL
-            + 0.08 * s_days  # Balance de días
-            + 0.20 * s_def  # Déficit semanal
-            + 0.22 * s_daily  # BALANCE DIARIO (NUEVO - evita saturar 1 persona/día)
-            + 0.04 * s_cont  # Continuidad (reducido)
-            + 0.04 * s_dia  # Día frecuente
+            0.18 * s_af  # Afinidad histórica emp-ws  (↑ de 0.08)
+            + 0.07 * s_h  # Horario típico del ws      (↑ de 0.04)
+            + 0.16 * s_balance  # Balance carga semanal    (↓ de 0.22)
+            + 0.06 * s_days  # Balance días trabajados   (↓ de 0.08)
+            + 0.16 * s_def  # Déficit horas semanales   (↓ de 0.20)
+            + 0.17 * s_daily  # Balance diario           (↓ de 0.22)
+            + 0.06 * s_cont  # Continuidad              (↑ de 0.04)
+            + 0.10 * s_dia  # Día frecuente histórico   (↑ de 0.04)
             + bonus_q
             - penalty_s
             - penalty_v
         )
-        # Bonus extra para empleados SIN asignación (forzar distribución)
+        # Bonus para empleados SIN asignación (forzar distribución mínima)
         if estado.minutos_semana == 0:
-            score += 0.15
+            score += 0.10  # reducido de 0.15 para no pisotear el histórico
 
-        # ── AJUSTES POR SUGERENCIAS PREVIAS ──
+        # ── BONUS POR PATRÓN FUERTE (empleado muy consistente en este ws+dow) ──
+        # Si el empleado tiene >= 8 apariciones históricas en ESTE ws en ESTE día
+        # de la semana, recibe un bonus que lo prioriza con alta certeza.
+        # Esto resuelve el caso Eneko (mié-dom 16h, 92 sábados), Félix, Naiara, etc.
+        patron_fuerte_bonus = 0.0
+        if pat and pat.frecuencia > 0:
+            # Frecuencia de este emp en este ws en este día concreto de la semana
+            freq_en_este_dow = 0
+            for it in getattr(pat, "_raw_items_dow", {}).get(dow, []):
+                freq_en_este_dow += 1
+            # Fallback: usar dias_frecuentes (posición 0 = más frecuente)
+            if dow in pat.dias_frecuentes:
+                rank = pat.dias_frecuentes.index(dow)
+                # rank=0 → día más frecuente → bonus 0.20; rank=4 → 0.08
+                patron_fuerte_bonus = max(0.0, 0.20 - rank * 0.03)
+                # Extra si la frecuencia absoluta es alta (>30 = patrón muy fijo)
+                if pat.frecuencia > 30:
+                    patron_fuerte_bonus += 0.05
+                if pat.frecuencia > 60:
+                    patron_fuerte_bonus += 0.05
+
+        score += patron_fuerte_bonus
         hints = getattr(self, "suggestion_hints", {})
         emp_name = self._emp_name_map.get(emp_id, "").upper()
         if hints and emp_name:
@@ -764,8 +788,9 @@ class AIScheduleGenerator:
             print(f"[AI-GEN] {msg}")
 
     def _coverage_pct_from_cov(self, coverage_stats) -> float:
-        total_req = sum(cs["demand"].need for cs in coverage_stats.values())
-        total_cov = sum(cs["covered"] for cs in coverage_stats.values())
+        # Solo cuenta slots donde need > 0 para evitar inflar % con demandas vacías
+        total_req = sum(cs["demand"].need for cs in coverage_stats.values() if cs["demand"].need > 0)
+        total_cov = sum(cs["covered"] for cs in coverage_stats.values() if cs["demand"].need > 0)
         return round((total_cov / total_req) * 100.0, 1) if total_req else 100.0
 
     def generar(self, emps, demands, week, overrides=None, hybrid_groups=None, min_coverage_pct: float = 80.0):
@@ -810,11 +835,17 @@ class AIScheduleGenerator:
             n_cand = sum(1 for e in emps if e.can(dm.wsid) and not e.off(dm.date) and not e.absent_day(dm.date))
             is_night = _t2m(dm.start) >= 20 * 60
             is_wknd = dm.date.weekday() >= 5
+            # CORRECCIÓN: fin de semana (vie/sáb/dom) = mayor prioridad en restaurante.
+            # Antes se penalizaban (-30) → se agendaban al final → quedaban sin cubrir.
+            # Ahora reciben bonus: se agendan primero para garantizar cobertura.
+            is_fri = dm.date.weekday() == 4   # viernes
+            is_wknd_core = dm.date.weekday() >= 5  # sáb/dom
             prio = (
                 n_cand * 10
-                - (50 if is_night else 0)
-                - (30 if is_wknd else 0)
-                - (20 if getattr(dm, "has_hybrid_component", False) else 0)
+                - (30 if is_night else 0)          # noche: penalización moderada
+                + (40 if is_fri else 0)            # viernes: alta prioridad
+                + (50 if is_wknd_core else 0)      # sáb/dom: máxima prioridad
+                - (10 if getattr(dm, "has_hybrid_component", False) else 0)
             )
             demand_pri.append((prio, dm))
         demand_pri.sort(key=lambda x: (x[0], x[1].date, _t2m(x[1].start)))
@@ -1146,10 +1177,18 @@ class AIScheduleGenerator:
             cs["coverage_pct"] = round((cs["covered"] / n) * 100, 1) if n > 0 else 100.0
 
         diag = self._diag_descanso(emps, week, estados)
-        total_req = sum(dm.need for dm in demands)
-        total_cov = sum(cs["covered"] for cs in coverage_stats.values())
+        # Cobertura REAL: sólo slots donde need > 0 (excluye tramos need=0)
+        # Esto evita inflar el % con demandas vacías (señalado por Xabi/Rubén)
+        real_demands = [dm for dm in demands if dm.need > 0]
+        total_req = sum(dm.need for dm in real_demands)
+        total_cov = sum(coverage_stats[dm.id]["covered"] for dm in real_demands if dm.id in coverage_stats)
         pct = round(total_cov / total_req * 100, 1) if total_req else 100.0
-        self._log(f"══ RESULTADO: {total_cov}/{total_req} = {pct}% ══")
+        # También log del total incluyendo need=0 (para referencia interna)
+        total_req_all = sum(dm.need for dm in demands)
+        total_cov_all = sum(cs["covered"] for cs in coverage_stats.values())
+        pct_all = round(total_cov_all / total_req_all * 100, 1) if total_req_all else 100.0
+        self._log(f"══ RESULTADO REAL (need>0): {total_cov}/{total_req} = {pct}% ══")
+        self._log(f"   (total incluyendo need=0): {total_cov_all}/{total_req_all} = {pct_all}%)")
         self._log(f"   Removidos por 3h/bloque: {removed}")
 
         # ── DIAGNÓSTICO DE EQUIDAD ──
